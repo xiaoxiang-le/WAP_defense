@@ -10,6 +10,12 @@ import re
 from urllib.parse import unquote
 
 
+def normalize_payload(payload):
+    payload = unquote(unquote(str(payload))).lower()
+    payload = re.sub(r'\d+', "0", payload)
+    return re.sub(r'(http|https)://[a-zA-Z0-9\.@&/#!#\?]+', "http://u", payload)
+
+
 def get_last_char(url):
     if re.search('/$', url, re.IGNORECASE):
         return 1
@@ -57,15 +63,9 @@ def countfeature(payload):
     print('%f,%f,%f,%f,%f,%f,%f' % (key_num,symbol_f,capital_f,num_f,space_f,special_f,prefix_f))
 
 def GeneSeg(payload):
-    #数字泛化为"0"
-    payload=payload.lower()
-    payload=unquote(unquote(payload))
-    payload,num=re.subn(r'\d+',"0",payload)
-    #替换url为”http://u
-    payload,num=re.subn(r'(http|https)://[a-zA-Z0-9\.@&/#!#\?]+', "http://u", payload)
+    payload = normalize_payload(payload)
     #分词
-    r = '''
-        (?x)[\w\.]+?\(
+    r = r'''(?x)[\w\.]+?\(
         |\)
         |"\w+?"
         |'\w+?'

@@ -1,144 +1,136 @@
-# -*- coding: UTF-8 -*-
-from tkinter import *
-import matplotlib
-matplotlib.use("TkAgg")
+import queue
+import threading
+import tkinter as tk
+from pathlib import Path
+
 from PIL import Image, ImageTk
-from geturl import *
-from type import *
-import time
 
-#URL：www.solarpeng.com/
-#www.solarpeng.com/?cat=<script>alert(1)<script>
+from geturl import sniff_requests
+from train_url import Train, split_word
+from type import find_type
 
 
-
-class MY_GUI():
-
-    def __init__(self,parent_init_name):
-        self.parent_init_name = parent_init_name
-        self.ListIP = []
-        self.ListInformation = []
-        self.new_url_list = []
-
-    def set_init_windows(self):
-        self.parent_init_name.title("web入侵检测系统")
-        self.parent_init_name.geometry('700x700+10+10')
-        self.parent_init_name.resizable(width=True, height=True)
-
-        self.ImageFrame = Frame(self.parent_init_name)
-        self.ImgFrame = LabelFrame(self.ImageFrame, text="Warning!!!")
-        self.im = Image.open("../image/warning.jpeg")
-        self.img = ImageTk.PhotoImage(self.im)
-        Label(self.ImgFrame, width=627, height=220, image=self.img).grid(row=0, column=0, columnspan=3)
-        self.ImgFrame.pack()
-        self.ImageFrame.pack()
-
-        self.textframe = Frame(self.parent_init_name)
-        self. developer = LabelFrame(self.textframe, text="开发信息")
-        self.developer.pack(padx=10, pady=10)
-        self.textframe.pack()
-        Label(self.developer, width=70, height=2, bg="white", text="开发人员：郭文博\n").grid(column=0, row=0)
-        Label(self.developer, width=70, height=2, bg="white", text="开发环境：Mac os\n").grid(column=0, row=1)
-        Label(self.developer, width=70, height=2, bg="white", text="开发时间：2018-1-05\n").grid(column=0, row=2)
-        Label(self.developer, width=70, height=2, bg="white", text="版本号：D-1.00\n").grid(column=0, row=3)
+BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-    #  扫描的局域网主机ip信息
-        self.IpFrame = Frame(self.parent_init_name)
-        self.iplistframe = LabelFrame(self.IpFrame,text = "实时入侵检测结果显示")
-        self.iplistframe.pack(padx=10, pady=10)
-        self.listip = Listbox(self.iplistframe,width=70,bd = 0)
-        # self.listip.bind('<Double-Button-1>', self.output_information)
-        for item in self.ListIP:
-            self.listip.insert(END,item)
-        self.listip.pack()
-        self.IpFrame.pack()
+class WafUI:
+    def __init__(self, root, interface=None, port=80):
+        self.root = root
+        self.interface = interface
+        self.port = port
+        self.events = queue.Queue()
+        self.stop_event = threading.Event()
+        self.worker = None
+        self.warning_image = None
 
-    #  UI界面按钮
-        self.buttonframe = Frame(self.parent_init_name)
-        Button(self.buttonframe,text="开始", command=self.printhello).grid(column=0, row=0)
-        Button(self.buttonframe, text="退出", command=self.exitui).grid(column=1, row=0)
-        Button(self.buttonframe, text="帮助", command=self.help).grid(column=2, row=0)
-        self.buttonframe.pack()
+        self._build()
+        self.root.after(100, self._poll_events)
+        self.root.protocol("WM_DELETE_WINDOW", self.exit_ui)
 
-    def help(self):
+    def _build(self):
+        self.root.title("Web 入侵检测系统")
+        self.root.geometry("700x650+10+10")
 
-        top = Toplevel()
-        top.title("帮助")
-        top.geometry('600x600')
+        image_frame = tk.LabelFrame(self.root, text="Warning")
+        image_frame.pack(fill="x", padx=10, pady=10)
+        image = Image.open(BASE_DIR / "image" / "warning.jpeg")
+        image.thumbnail((627, 220))
+        self.warning_image = ImageTk.PhotoImage(image)
+        tk.Label(image_frame, image=self.warning_image).pack()
 
-        ImageFrame = Frame(top)
-        ImgFrame = LabelFrame(ImageFrame,text = "help")
-        im = Image.open("../image/1.jpg")
-        img = ImageTk.PhotoImage(im)
-        Label(ImgFrame, width=350,height=160,image=img).grid(row=0, column=0,columnspan=3)
-        ImgFrame.pack()
-        ImageFrame.pack()
+        info_frame = tk.LabelFrame(self.root, text="运行信息")
+        info_frame.pack(fill="x", padx=10, pady=5)
+        interface_text = self.interface or "系统默认网卡"
+        tk.Label(
+            info_frame,
+            text="监听接口：{}    HTTP 端口：{}".format(interface_text, self.port),
+        ).pack(pady=6)
 
-        # pilImage = Image.open("1.png")
-        # tkImage = ImageTk.PhotoImage(image=pilImage)
-        # label = Label(top,image=tkImage)
-        # label.pack()
+        result_frame = tk.LabelFrame(self.root, text="实时入侵检测结果")
+        result_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        self.result_list = tk.Listbox(result_frame, width=90, height=15)
+        self.result_list.pack(fill="both", expand=True, padx=6, pady=6)
 
-        textframe = Frame(top)
-        developer = LabelFrame(textframe, text="使用教程")
-        developer.pack(padx=10, pady=10)
-        textframe.pack()
-        Label(developer, width=50, height=2, bg="white", text="环境配置：python3.6\n").grid(column=0, row=0)
-        Label(developer, width=50, height=2, bg="white", text="开始按钮：开始检测URL\n").grid(column=0, row=1)
-        Label(developer, width=50, height=2, bg="white", text="退出按钮：点击即可退出系统程序                      \n").grid(column=0,row=2)
-        Label(developer, width=50, height=2, bg="white", text="帮助按钮：提示程序如何进行使用                      \n").grid(column=0,row=3)
-        Label(developer, width=50, height=2, bg="white", text="检测情况：该区域会显示系统检测的url分类结果，\n").grid(column=0, row=4)
+        button_frame = tk.Frame(self.root)
+        button_frame.pack(pady=8)
+        self.start_button = tk.Button(
+            button_frame, text="开始", width=10, command=self.toggle_detection
+        )
+        self.start_button.grid(column=0, row=0, padx=5)
+        tk.Button(button_frame, text="退出", width=10, command=self.exit_ui).grid(
+            column=1, row=0, padx=5
+        )
+        tk.Button(button_frame, text="帮助", width=10, command=self.show_help).grid(
+            column=2, row=0, padx=5
+        )
 
-        top.mainloop()
+    def toggle_detection(self):
+        if self.worker and self.worker.is_alive():
+            self.stop_event.set()
+            self.start_button.config(text="开始")
+            return
 
-    def output_information(self):
+        self.stop_event.clear()
+        self.start_button.config(text="停止")
+        self.worker = threading.Thread(target=self._capture_loop, daemon=True)
+        self.worker.start()
 
-        pass
-    def get_url(self,event):
+    def _capture_loop(self):
+        try:
+            detector = Train.load_or_train()
+            self.events.put(["检测已启动，正在等待 HTTP 请求..."])
+            while not self.stop_event.is_set():
+                records = sniff_requests(
+                    interface=self.interface,
+                    port=self.port,
+                    timeout=1,
+                    count=1,
+                )
+                for record in records:
+                    result = detector.predict([record["url"]])
+                    attack_type = (
+                        find_type(split_word(record["url"]))
+                        if result == "url为恶意攻击"
+                        else "攻击类型：无"
+                    )
+                    self.events.put(record["display"] + [result, attack_type])
+        except Exception as error:
+            self.events.put(["检测停止：{}".format(error)])
+        finally:
+            self.stop_event.set()
+            self.events.put(None)
 
-        pass
+    def _poll_events(self):
+        try:
+            while True:
+                event = self.events.get_nowait()
+                if event is None:
+                    self.start_button.config(text="开始")
+                    continue
+                self.result_list.delete(0, tk.END)
+                for item in event:
+                    self.result_list.insert(tk.END, item)
+        except queue.Empty:
+            pass
+        self.root.after(100, self._poll_events)
 
-    def printhello(self):
+    def show_help(self):
+        help_window = tk.Toplevel(self.root)
+        help_window.title("帮助")
+        help_window.geometry("520x220")
+        message = (
+            "点击“开始”监听 HTTP 请求，再次点击可停止。\n\n"
+            "Windows 实时抓包需要安装 Npcap，并以管理员权限运行。\n"
+            "HTTPS 内容经过加密，当前版本不能直接解析。"
+        )
+        tk.Label(help_window, text=message, justify="left", padx=20, pady=20).pack()
 
-        while True:
-
-            Sniffer()
-            if (test != []):
-                self.new_url_list = test[0]
-                url_list = []
-                new_url = unquote(test[0][4][4:]).lower()
-                print(new_url)
-                new_url_split = split_word(new_url)
-                print(new_url_split)
-                url_list.append(new_url)
-                print('____')
-                print(url_list)
-                a = Train()
-                url_type = find_type(new_url_split)
-                result = a.predict(url_list)
-                self.new_url_list.append(result)
-                self.new_url_list.append(url_type)
-                print(self.new_url_list)
-                time.sleep(3)
-                
-            self.add_information()
-
-
-    def add_information(self):
-
-        self.listip.delete(0, END)
-        for i in self.new_url_list:
-            self.listip.insert(END, i)
-
-    def exitui(self):
-
-        exit(0)
+    def exit_ui(self):
+        self.stop_event.set()
+        self.root.destroy()
 
 
-def UI_start():
-
-    init_windows = Tk()
-    ZMJ_PORTAL = MY_GUI(init_windows)
-    ZMJ_PORTAL.set_init_windows()
-    init_windows.mainloop()
+def UI_start(interface=None, port=80):
+    root = tk.Tk()
+    WafUI(root, interface=interface, port=port)
+    root.mainloop()

@@ -1,57 +1,45 @@
-# -*- coding: utf-8 -*-
-# @Project ：AiWaf
-# @Time    : 2022/5/24 23:04
-# @Author  : honywen
-# @FileName: loaddata.py
-# @Software: PyCharm
-
 import csv
-from collections import Counter
+from pathlib import Path
 
 
-def label2onehot(label):
-    onehot_label = [0,0,0]
-    onehot_label[label] = 1
-    return onehot_label
+BASE_DIR = Path(__file__).resolve().parent.parent
+DATA_DIR = BASE_DIR / "data"
+
+NORMAL = 0
+XSS = 1
+SQL_INJECTION = 2
+LABEL_NAMES = ("正常", "XSS攻击", "SQL注入攻击")
 
 
-#  加载XSS和SQLI的数据集
-def loaddata_xss():
-    data_list = list()
-    lable_list = list()
-    filename = "../data/XSS_dataset.csv"
-    with open(filename, encoding="utf8") as f:
-        csv_reader = csv.reader(f)
-        for line_no, line in enumerate(csv_reader, 1):
-            if line_no == 1:
-                pass   # 文件头不读取
-            else:
-                data_list.append(line[1])                   #   0： 正常样本
-                onehothlabel = label2onehot(int(line[2]))   #   1: xss恶意样本
-                lable_list.append(onehothlabel)
-    # result = Counter(lable_list)
-    # print(result)
-    return data_list,lable_list
+def _read_dataset(filename, data_column, label_column, attack_label):
+    data = []
+    labels = []
+    with Path(filename).open(encoding="utf-8", errors="ignore", newline="") as handle:
+        reader = csv.reader(handle)
+        next(reader, None)
+        for row in reader:
+            if len(row) <= max(data_column, label_column):
+                continue
+            payload = row[data_column].strip()
+            source_label = row[label_column].strip()
+            if not payload or source_label not in {"0", "1"}:
+                continue
+            data.append(payload)
+            labels.append(NORMAL if source_label == "0" else attack_label)
+    return data, labels
 
 
-def loaddata_sqli():
-    data_list = list()
-    lable_list = list()
-    filename = "../data/SQLiV3.csv"
-    with open(filename, encoding="utf-8", errors='ignore') as f:
-        csv_reader = csv.reader(f)
-        for line_no, line in enumerate(csv_reader, 1):
-            if line_no == 1:
-                pass   # 文件头不读取
-            else:
-                data = line[0]
-                label = line[1]
-                if data.strip() == "" or label not in ["1","0"]:
-                    continue
-                data_list.append(data)
-                if label == 0:
-                    onehothlabel = label2onehot(int(label))     #   0： 正常样本
-                else:
-                    onehothlabel = label2onehot(int(label)+1)    #   2: sqli恶意样本
-                lable_list.append(onehothlabel)
-    return data_list,lable_list
+def loaddata_xss(filename=None):
+    path = Path(filename) if filename else DATA_DIR / "XSS_dataset.csv"
+    return _read_dataset(path, data_column=1, label_column=2, attack_label=XSS)
+
+
+def loaddata_sqli(filename=None):
+    path = Path(filename) if filename else DATA_DIR / "SQLiV3.csv"
+    return _read_dataset(path, data_column=0, label_column=1, attack_label=SQL_INJECTION)
+
+
+def load_all_data():
+    sqli_data, sqli_labels = loaddata_sqli()
+    xss_data, xss_labels = loaddata_xss()
+    return sqli_data + xss_data, sqli_labels + xss_labels

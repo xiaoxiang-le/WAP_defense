@@ -1,57 +1,33 @@
-# -*- coding: utf-8 -*-
-# @Time    : 2020/12/19 14:35
-# @Author  : blue
-# @FileName: rf.py
-# @Software: PyCharm
-
+from pathlib import Path
 
 import joblib
-import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, accuracy_score, confusion_matrix
-from evaluate import plot_confusion_matrix, evaluate_from_confusion_matrix
+
+from evaluate import evaluate_predictions
+
+
+MODEL_PATH = Path(__file__).resolve().parent.parent / "model" / "mult_rf.pkl"
 
 
 class RFModel:
-    def __init__(self, label_list, train_data, train_label, test_data, test_label):
-        self.label_list = label_list
+    def __init__(self, train_data, train_labels, test_data, test_labels, seed=42):
         self.train_data = train_data
-        self.train_label = train_label
+        self.train_labels = train_labels
         self.test_data = test_data
-        self.test_label = test_label
+        self.test_labels = test_labels
+        self.seed = seed
 
-    def rf_alg(self):
-        rf_model = RandomForestClassifier(n_estimators=10, max_features='sqrt', random_state=None)
-        print("[INFO] Successfully initialize a RF model!")
-        print("[INFO] Training the model…")
-        rf_model.fit(self.train_data, np.argmax(self.train_label, axis=1))  # Assuming train_label is also one-hot
-        print("[INFO] Model training completed!")
-
-        # 保存模型
-        model_path = '../model/mult_rf.pkl'
-        joblib.dump(rf_model, model_path)
-        print("[INFO] Model has been saved!")
-
-        # 进行测试数据的预测
-        rf_predictions = rf_model.predict(self.test_data)
-        # 将预测的类别索引转换为one-hot编码以匹配test_label
-        rf_predictions_onehot = np.eye(len(self.label_list))[rf_predictions]
-
-        # 计算模型的准确率
-        rf_acc = accuracy_score(np.argmax(self.test_label, axis=1), rf_predictions)  # 使用整数索引进行比较
-        print("Overall accuracy: %f" % rf_acc)
-
-        # 生成混淆矩阵和分类报告
-        rf_confusion_matrix = confusion_matrix(np.argmax(self.test_label, axis=1), rf_predictions)
-        print("Confusion matrix:\n", rf_confusion_matrix)
-        rf_classification_rep = classification_report(np.argmax(self.test_label, axis=1), rf_predictions, target_names=self.label_list)
-        print("Classification report: \n", rf_classification_rep)
-
-        # 绘制混淆矩阵
-        plot_confusion_matrix('Random Forest', rf_confusion_matrix, self.label_list)
-        evaluate_metrics = evaluate_from_confusion_matrix(rf_confusion_matrix)
-        print("Classification Metrics:")
-        print("Accuracy: {:.2f}%".format(evaluate_metrics['Accuracy'] * 100))
-        print("Macro Precision: {:.2f}%".format(evaluate_metrics['Macro Precision'] * 100))
-        print("Macro Recall: {:.2f}%".format(evaluate_metrics['Macro Recall'] * 100))
-        print("Macro F1 Score: {:.2f}%".format(evaluate_metrics['Macro F1 Score'] * 100))
+    def train(self):
+        model = RandomForestClassifier(
+            n_estimators=100,
+            max_features="sqrt",
+            class_weight="balanced",
+            random_state=self.seed,
+            n_jobs=-1,
+        )
+        print("[RF] 开始训练")
+        model.fit(self.train_data, self.train_labels)
+        MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(model, MODEL_PATH)
+        predictions = model.predict(self.test_data)
+        return evaluate_predictions("RF", self.test_labels, predictions)

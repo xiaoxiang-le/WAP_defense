@@ -1,75 +1,72 @@
-# _*_ coding:utf-8 _*_
-
-'''
-author:   guowenbo
-time:     2019/1/4
-us:       sichuanunivesity
-'''
-
-from scapy.all import *
 from urllib.parse import unquote
-from train_url import *
+
+from scapy.all import Ether, IP, TCP, bind_layers, sniff
+
 try:
-    # This import works from the project directory
     import scapy_http.http as http
 except ImportError:
-    # If you installed this package via pip, you just need to execute this
     from scapy.layers import http
 
-test = []
-def Sniffer():
 
-    rule = 'tcp port 80'
+def _decode(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value or "")
 
-    # prn = lambda x: x[IP].src
-    # lambda x: x.summary()
-    # <script>alert(1)<script>
 
-    http_sniffer = sniff(filter=rule,iface= 'en0',prn = pack_callback,count=1)
-    # wrpcap("en0sniff.pcap", http_sniffer)
+def packet_to_record(packet):
+    if not packet.haslayer(TCP) or not packet.haslayer(http.HTTPRequest):
+        return None
 
-def pack_callback(packet):
+    request = packet[http.HTTPRequest]
+    host = _decode(getattr(request, "Host", b""))
+    path = _decode(getattr(request, "Path", b""))
+    url = unquote(host + path)
+    if not url:
+        return None
 
-    pack_for_url = []
-    if 'TCP' in packet:
-        Ether_dst = 'Mac_Dst：' + packet.dst
-        Ether_src = 'Mac_Src：' + packet.src
-        IP_src = 'IP_Src：' + packet.payload.src
-        IP_dst = 'IP_Dst：' + packet.payload.dst
+    source_ip = packet[IP].src if packet.haslayer(IP) else ""
+    target_ip = packet[IP].dst if packet.haslayer(IP) else ""
+    source_mac = packet[Ether].src if packet.haslayer(Ether) else ""
+    target_mac = packet[Ether].dst if packet.haslayer(Ether) else ""
+    method = _decode(getattr(request, "Method", b""))
+    user_agent = _decode(getattr(request, "User_Agent", b""))
 
-        if packet.haslayer(http.HTTPRequest):
+    return {
+        "url": url,
+        "display": [
+            "IP_Src：" + source_ip,
+            "IP_Dst：" + target_ip,
+            "Mac_Src：" + source_mac,
+            "Mac_Dst：" + target_mac,
+            "URL：" + url,
+            "Method：" + method,
+            "User-Agent：" + user_agent,
+            "Host：" + host,
+            "Path：" + path,
+        ],
+    }
 
-            http_header = packet[http.HTTPRequest].fields
-            http_method = 'Method：' + http_header['Method'].decode()
-            http_agent = 'User-Agent：' + http_header['User-Agent'].decode()
-            http_host = 'Host：' + http_header['Host'].decode()
-            http_path = 'Path：' + http_header['Path'].decode()
-            deal_good_url = 'URL：' + unquote(http_header['Host'].decode() + http_header['Path'].decode())
 
-            if deal_good_url:
+def sniff_requests(interface=None, port=80, timeout=1, count=1):
+    records = []
+    bind_layers(TCP, http.HTTP, sport=port)
+    bind_layers(TCP, http.HTTP, dport=port)
 
-                print(IP_src)
-                print(IP_dst)
-                print(Ether_src)
-                print(Ether_dst)
-                print(deal_good_url)
-                print(http_method)
-                print(http_agent)
-                print(http_host)
-                print(http_path)
-                pack_for_url.append(IP_src)
-                pack_for_url.append(IP_dst)
-                pack_for_url.append(Ether_src)
-                pack_for_url.append(Ether_dst)
-                pack_for_url.append(deal_good_url)
-                pack_for_url.append(http_method)
-                pack_for_url.append(http_agent)
-                pack_for_url.append(http_host)
-                pack_for_url.append(http_path)
-                test.append(pack_for_url)
-                print(pack_for_url)
+    def callback(packet):
+        record = packet_to_record(packet)
+        if record:
+            records.append(record)
 
-        elif packet.haslayer(http.HTTPResponse):
-            pass
-
-    return pack_for_url
+    options = {
+        "filter": "tcp port {}".format(port),
+        "lfilter": lambda packet: packet.haslayer(http.HTTPRequest),
+        "prn": callback,
+        "count": count,
+        "timeout": timeout,
+        "store": False,
+    }
+    if interface:
+        options["iface"] = interface
+    sniff(**options)
+    return records

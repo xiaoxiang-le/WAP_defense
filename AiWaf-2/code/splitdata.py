@@ -1,61 +1,53 @@
-# -*- coding: utf-8 -*-
-# @Project ：AiWaf
-# @Time    : 2022/5/25 19:55
-# @Author  : honywen
-# @FileName: splitdata.py
-# @Software: PyCharm
+from sklearn.model_selection import train_test_split
+
+from loaddata import load_all_data
 
 
-import random
-from vecmodel import data2vec
-from loaddata import loaddata_sqli, loaddata_xss
-
-
-#   训练集测试集数据划分
-def splitdata(dataloader):
-    #  划分训练验证测试集  划分比例6：2：2
-    len_dataloader = len(dataloader)
-    trainvalidaset_num = int(len_dataloader * 0.8)
-    trainvalidaset_idxs = random.sample(range(0, len_dataloader), trainvalidaset_num)
-
-    validation_num = int(trainvalidaset_num * 0.25)
-    validation_idxs = random.sample(trainvalidaset_idxs, validation_num)
-
-    trainset_idxs = list(set(trainvalidaset_idxs) - set(validation_idxs))
-    train_dataloader = [dataloader[i] for i in trainset_idxs]
-    validation_dataloader = [dataloader[i] for i in validation_idxs]
-    test_dataloader = list()
-    for i in range(len_dataloader):
-        if i in trainvalidaset_idxs:
-            pass
+def _deduplicate(data, labels):
+    samples = {}
+    conflicts = set()
+    for payload, label in zip(data, labels):
+        key = payload.strip()
+        previous = samples.get(key)
+        if previous is not None and previous != label:
+            conflicts.add(key)
         else:
-            test_dataloader.append(dataloader[i])
-    print(len(train_dataloader), len(validation_dataloader), len(test_dataloader))
-    return train_dataloader, validation_dataloader, test_dataloader
+            samples[key] = label
+
+    for key in conflicts:
+        samples.pop(key, None)
+    return list(samples.keys()), list(samples.values())
 
 
-def splitmain():
-    data_list_sqli, lable_list_sqli = loaddata_sqli()
-    data_list_xss, lable_list_xss = loaddata_xss()
-    data_list_sqli_vec = data2vec(data_list_sqli)
-    data_list_xss_vec = data2vec(data_list_xss)
-    sqli_dataloader = list(zip(data_list_sqli_vec,lable_list_sqli))
-    xss_dataloader = list(zip(data_list_xss_vec, lable_list_xss))
-    sqli_train_dataloader,sqli_validation_dataloader, sqli_test_dataloader = splitdata(sqli_dataloader)
-    xss_train_dataloader, xss_validation_dataloader, xss_test_dataloader = splitdata(xss_dataloader)
-    train_dataloader = sqli_train_dataloader + xss_train_dataloader
-    validation_dataloader = sqli_validation_dataloader + xss_validation_dataloader
-    test_dataloader = sqli_test_dataloader + xss_test_dataloader
-    #   打乱数据顺序
-    random.shuffle(train_dataloader)
-    random.shuffle(validation_dataloader)
-    random.shuffle(test_dataloader)
-    train_data = [i[0] for i in train_dataloader]
-    train_label = [i[1] for i in train_dataloader]
-    validation_data = [i[0] for i in validation_dataloader]
-    validation_label = [i[1] for i in validation_dataloader]
-    test_data = [i[0] for i in test_dataloader]
-    test_label = [i[1] for i in test_dataloader]
-    return train_data,train_label,validation_data,validation_label,test_data,test_label
+def splitmain(seed=42):
+    data, labels = load_all_data()
+    data, labels = _deduplicate(data, labels)
 
+    train_data, test_data, train_labels, test_labels = train_test_split(
+        data,
+        labels,
+        test_size=0.2,
+        random_state=seed,
+        stratify=labels,
+    )
+    train_data, validation_data, train_labels, validation_labels = train_test_split(
+        train_data,
+        train_labels,
+        test_size=0.25,
+        random_state=seed,
+        stratify=train_labels,
+    )
 
+    print(
+        "数据集大小：训练 {}，验证 {}，测试 {}".format(
+            len(train_data), len(validation_data), len(test_data)
+        )
+    )
+    return (
+        train_data,
+        train_labels,
+        validation_data,
+        validation_labels,
+        test_data,
+        test_labels,
+    )

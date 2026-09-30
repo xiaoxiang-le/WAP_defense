@@ -1,70 +1,100 @@
-# -*- coding: utf-8 -*-
-# @Project ：AiWaf
-# @Time    : 2022/5/25 22:49
-# @Author  : honywen
-# @FileName: predict.py
-# @Software: PyCharm
-
+import argparse
+from collections import Counter
+from pathlib import Path
+import sys
 
 import joblib
 import numpy as np
 from tensorflow import keras
-from vecmodel import payload2vec
+
+from loaddata import LABEL_NAMES
+from vecmodel import FeaturePipeline
 
 
-def translabel(pred):
-    pred = pred.tolist()[0]
-    if pred == [0,0,0]:
-        label = "正常"
-    elif pred == [1,0,0]:
-        label = "正常"
-    elif pred == [0,1,0]:
-        label = "XSS攻击"
-    else:
-        label = "SQL注入攻击"
-    return label
+BASE_DIR = Path(__file__).resolve().parent.parent
+MODEL_DIR = BASE_DIR / "model"
+MODEL_NAMES = ("rf", "knn", "svm", "cnn", "gru")
+DEFAULT_PAYLOAD = (
+    "http://honywen.com/index.cgi?year=<script>alert(1)</script>"
+)
 
 
-def cnn_translabel(pred):
-    pred = pred.tolist()[0]
-    label_index = pred.index(max(pred))
-    label_list = ["正常","XSS攻击","SQL注入攻击"]
-    return label_list[label_index]
+def configure_console_encoding():
+    if sys.platform == "win32":
+        for stream in (sys.stdout, sys.stderr):
+            if hasattr(stream, "reconfigure"):
+                stream.reconfigure(encoding="utf-8")
 
 
-def predict(payload):
-    #  加载预测模型
-    rf_model = joblib.load("../model/mult_rf.pkl")
-    knn_model = joblib.load("../model/mult_knn.pkl")
-    cnn_model = keras.models.load_model('../model/mult_cnn')
-    gru_model = keras.models.load_model('../model/gru.h5')
-    svm_model = joblib.load('../model/mult_svm.pkl')
-
-    #  payload进行预处理
-    payload_vec = payload2vec(payload)
-    payload_vec = np.array(payload_vec)
-    payload_reshape = payload_vec.reshape((1, 1, payload_vec.shape[1], 1))
-    payload_reshape_gru = payload_vec.reshape((1, 1, payload_vec.shape[1]))
-    rf_pred = rf_model.predict(payload_vec)
-    knn_pred = knn_model.predict(payload_vec)
-    svm_pred = svm_model.predict(payload_vec)
-    cnn_pred = cnn_model.predict(payload_reshape)
-    gru_pred = gru_model.predict(payload_reshape_gru)
-
-    rf_label = translabel(rf_pred)
-    knn_label = translabel(knn_pred)
-    cnn_label = cnn_translabel(cnn_pred)
-    gru_label = cnn_translabel(gru_pred)
-    svm_label = translabel(svm_pred)
-
-    print("RandomForest模型预测结果：" + rf_label)
-    print("KNN模型预测结果：" + knn_label)
-    print("CNN模型预测结果：" + cnn_label)
-    print("GRU模型预测结果：" + gru_label)
-    print("SVM模型预测结果：" + svm_label)
+def label_name(label):
+    return LABEL_NAMES[int(label)]
 
 
-predict("http://honywen.com/examples/jsp/checkbox/bandwidth/index.cgi?action=showmonth&year=<script>foo</script>&month=<script>foo</script>")
+def consensus_label(model_results):
+    counts = Counter(model_results.values())
+    if not counts:
+        raise ValueError("至少需要一个模型结果")
+    ranked = counts.most_common()
+    if len(ranked) > 1 and ranked[0][1] == ranked[1][1]:
+        return "模型意见不一致"
+    return ranked[0][0]
 
 
+def predict(payload, selected_models=("all",)):
+    pipeline = FeaturePipeline.load()
+    selected = set(MODEL_NAMES if "all" in selected_models else selected_models)
+    results = {}
+
+    if selected.intersection({"rf", "knn", "svm"}):
+        tfidf = pipeline.transform_tfidf([payload])
+        model_files = {
+            "rf": "mult_rf.pkl",
+            "knn": "mult_knn.pkl",
+            "svm": "mult_svm.pkl",
+        }
+        for model_name, filename in model_files.items():
+            if model_name in selected:
+                model = joblib.load(MODEL_DIR / filename)
+                results[model_name] = label_name(model.predict(tfidf)[0])
+
+    if selected.intersection({"cnn", "gru"}):
+        payload_sequence = pipeline.transform_sequence([payload])
+        model_files = {
+            "cnn": "mult_cnn.keras",
+            "gru": "gru.keras",
+        }
+        for model_name, filename in model_files.items():
+            if model_name in selected:
+                model = keras.models.load_model(MODEL_DIR / filename, compile=False)
+                probabilities = model.predict(payload_sequence, verbose=0)[0]
+                results[model_name] = label_name(np.argmax(probabilities))
+
+    if len(results) > 1:
+        results["ensemble"] = consensus_label(results)
+    return results
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="使用 AiWaf-2 模型检测请求 Payload")
+    parser.add_argument("payload", nargs="?", default=DEFAULT_PAYLOAD, help="待检测的 URL 或 Payload")
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        choices=("all",) + MODEL_NAMES,
+        default=["all"],
+        help="参与预测的模型，默认使用全部模型",
+    )
+    return parser.parse_args()
+
+
+def main():
+    configure_console_encoding()
+    args = parse_args()
+    results = predict(args.payload, args.models)
+    for model_name, result in results.items():
+        print("{} 模型预测结果：{}".format(model_name.upper(), result))
+
+
+if __name__ == "__main__":
+    main()
 
