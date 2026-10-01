@@ -1,8 +1,10 @@
 import argparse
+import os
 import random
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 
@@ -20,9 +22,10 @@ from vecmodel import FeaturePipeline
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-METRICS_PATH = BASE_DIR / "model" / "training_metrics.json"
-MANIFEST_PATH = BASE_DIR / "model" / "model_manifest.json"
-PIPELINE_PATH = BASE_DIR / "model" / "feature_pipeline.pkl"
+MODEL_DIR = BASE_DIR / "model"
+METRICS_PATH = MODEL_DIR / "training_metrics.json"
+MANIFEST_PATH = MODEL_DIR / "model_manifest.json"
+PIPELINE_PATH = MODEL_DIR / "feature_pipeline.pkl"
 MODEL_NAMES = ("rf", "knn", "svm", "cnn", "gru")
 MODEL_FILES = {
     "rf": "mult_rf.pkl",
@@ -146,38 +149,113 @@ def train_models(
     }
     full_retrain = selected == set(MODEL_NAMES)
 
-    if full_retrain:
-        pipeline = FeaturePipeline(**configuration)
-        print("正在拟合 TF-IDF 和序列词表...")
-        pipeline.fit(train_payloads)
-        pipeline.save(PIPELINE_PATH)
-        metrics = {}
-        manifest_models = {}
-    else:
-        pipeline, previous_manifest = _load_reusable_pipeline(
-            dataset_metadata=dataset_metadata,
-            seed=seed,
-            configuration=configuration,
-        )
-        metrics = load_json(METRICS_PATH) if METRICS_PATH.exists() else {}
-        manifest_models = dict(previous_manifest.get("models", {}))
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix=".training-", dir=str(MODEL_DIR)) as directory:
+        staging_dir = Path(directory)
+        if full_retrain:
+            pipeline = FeaturePipeline(**configuration)
+            print("正在拟合 TF-IDF 和序列词表...")
+            pipeline.fit(train_payloads)
+            pipeline.save(staging_dir / PIPELINE_PATH.name)
+            metrics = {}
+            manifest_models = {}
+        else:
+            pipeline, previous_manifest = _load_reusable_pipeline(
+                dataset_metadata=dataset_metadata,
+                seed=seed,
+                configuration=configuration,
+            )
+            metrics = load_json(METRICS_PATH) if METRICS_PATH.exists() else {}
+            manifest_models = dict(previous_manifest.get("models", {}))
 
+        _train_selected_models(
+            selected=selected,
+            pipeline=pipeline,
+            staging_dir=staging_dir,
+            train_payloads=train_payloads,
+            train_labels=train_labels,
+            validation_payloads=validation_payloads,
+            validation_labels=validation_labels,
+            test_payloads=test_payloads,
+            test_labels=test_labels,
+            epochs=epochs,
+            seed=seed,
+            metrics=metrics,
+        )
+
+        for model_name in selected:
+            filename = MODEL_FILES[model_name]
+            manifest_models[model_name] = {
+                "filename": filename,
+                "sha256": sha256_file(staging_dir / filename),
+            }
+
+        pipeline_candidate = (
+            staging_dir / PIPELINE_PATH.name if full_retrain else PIPELINE_PATH
+        )
+        manifest = {
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "dataset": dataset_metadata,
+            "seed": seed,
+            "labels": ["正常", "XSS攻击", "SQL注入攻击"],
+            "feature_configuration": configuration,
+            "pipeline": {
+                "filename": PIPELINE_PATH.name,
+                "sha256": sha256_file(pipeline_candidate),
+            },
+            "models": manifest_models,
+        }
+        _promote_artifacts(staging_dir, selected, include_pipeline=full_retrain)
+        atomic_json_dump(metrics, METRICS_PATH)
+        atomic_json_dump(manifest, MANIFEST_PATH)
+    print("\n训练完成，评估结果已保存至 {}".format(METRICS_PATH))
+    return metrics
+
+
+def _train_selected_models(
+    selected,
+    pipeline,
+    staging_dir,
+    train_payloads,
+    train_labels,
+    validation_payloads,
+    validation_labels,
+    test_payloads,
+    test_labels,
+    epochs,
+    seed,
+    metrics,
+):
     traditional = selected.intersection({"rf", "knn", "svm"})
     if traditional:
         train_tfidf = pipeline.transform_tfidf(train_payloads)
         test_tfidf = pipeline.transform_tfidf(test_payloads)
-
         if "rf" in selected:
             metrics["rf"] = RFModel(
-                train_tfidf, train_labels, test_tfidf, test_labels, seed=seed
+                train_tfidf,
+                train_labels,
+                test_tfidf,
+                test_labels,
+                seed=seed,
+                model_path=staging_dir / MODEL_FILES["rf"],
             ).train()
         if "knn" in selected:
             metrics["knn"] = KNNModel(
-                train_tfidf, train_labels, test_tfidf, test_labels
+                train_tfidf,
+                train_labels,
+                test_tfidf,
+                test_labels,
+                model_path=staging_dir / MODEL_FILES["knn"],
             ).train()
         if "svm" in selected:
             metrics["svm"] = SVMModel(
-                train_tfidf, train_labels, test_tfidf, test_labels, seed=seed
+                train_tfidf,
+                train_labels,
+                test_tfidf,
+                test_labels,
+                seed=seed,
+                model_path=staging_dir / MODEL_FILES["svm"],
             ).train()
 
     neural = selected.intersection({"cnn", "gru"})
@@ -188,7 +266,6 @@ def train_models(
         train_sequence = pipeline.transform_sequence(train_payloads)
         validation_sequence = pipeline.transform_sequence(validation_payloads)
         test_sequence = pipeline.transform_sequence(test_payloads)
-
         neural_arguments = (
             train_sequence,
             train_labels,
@@ -200,34 +277,25 @@ def train_models(
             pipeline.sequence_length,
         )
         if "cnn" in selected:
-            metrics["cnn"] = CNNModel(*neural_arguments, epochs=epochs).train()
+            metrics["cnn"] = CNNModel(
+                *neural_arguments,
+                epochs=epochs,
+                model_path=staging_dir / MODEL_FILES["cnn"],
+            ).train()
         if "gru" in selected:
-            metrics["gru"] = GRUModel(*neural_arguments, epochs=epochs).train()
+            metrics["gru"] = GRUModel(
+                *neural_arguments,
+                epochs=epochs,
+                model_path=staging_dir / MODEL_FILES["gru"],
+            ).train()
 
-    for model_name in selected:
+
+def _promote_artifacts(staging_dir, selected, include_pipeline):
+    if include_pipeline:
+        os.replace(str(staging_dir / PIPELINE_PATH.name), str(PIPELINE_PATH))
+    for model_name in sorted(selected):
         filename = MODEL_FILES[model_name]
-        manifest_models[model_name] = {
-            "filename": filename,
-            "sha256": sha256_file(BASE_DIR / "model" / filename),
-        }
-
-    manifest = {
-        "schema_version": MANIFEST_SCHEMA_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "dataset": dataset_metadata,
-        "seed": seed,
-        "labels": ["正常", "XSS攻击", "SQL注入攻击"],
-        "feature_configuration": configuration,
-        "pipeline": {
-            "filename": PIPELINE_PATH.name,
-            "sha256": sha256_file(PIPELINE_PATH),
-        },
-        "models": manifest_models,
-    }
-    atomic_json_dump(metrics, METRICS_PATH)
-    atomic_json_dump(manifest, MANIFEST_PATH)
-    print("\n训练完成，评估结果已保存至 {}".format(METRICS_PATH))
-    return metrics
+        os.replace(str(staging_dir / filename), str(MODEL_DIR / filename))
 
 
 def _load_reusable_pipeline(dataset_metadata, seed, configuration):
