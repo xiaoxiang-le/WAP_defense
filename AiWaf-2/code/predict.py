@@ -5,7 +5,6 @@ import sys
 
 import joblib
 import numpy as np
-from tensorflow import keras
 
 from artifacts import MANIFEST_SCHEMA_VERSION, load_json, sha256_file
 from loaddata import LABEL_NAMES
@@ -89,6 +88,8 @@ def predict(payload, selected_models=("all",)):
                 results[model_name] = label_name(model.predict(tfidf)[0])
 
     if selected.intersection({"cnn", "gru"}):
+        from tensorflow import keras
+
         payload_sequence = pipeline.transform_sequence([payload])
         for model_name in ("cnn", "gru"):
             if model_name in selected:
