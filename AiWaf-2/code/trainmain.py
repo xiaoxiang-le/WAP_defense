@@ -40,6 +40,40 @@ def configure_console_encoding():
                 stream.reconfigure(encoding="utf-8")
 
 
+def positive_integer(value):
+    number = int(value)
+    if number <= 0:
+        raise argparse.ArgumentTypeError("必须是大于 0 的整数")
+    return number
+
+
+def nonnegative_integer(value):
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("必须是大于或等于 0 的整数")
+    return number
+
+
+def validate_training_options(
+    selected_models, epochs, seed, max_features, max_vocab, sequence_length
+):
+    if "all" in selected_models and len(selected_models) != 1:
+        raise ValueError("all 不能与具体模型同时使用")
+    if not selected_models:
+        raise ValueError("至少需要选择一个模型")
+    if epochs <= 0 or max_features <= 0 or max_vocab <= 0 or sequence_length <= 0:
+        raise ValueError("训练轮数和特征规模必须大于 0")
+    if seed < 0:
+        raise ValueError("随机种子不能为负数")
+    selected = set(MODEL_NAMES if "all" in selected_models else selected_models)
+    unknown = selected.difference(MODEL_NAMES)
+    if unknown:
+        raise ValueError("未知模型：{}".format(", ".join(sorted(unknown))))
+    if "cnn" in selected and sequence_length < 7:
+        raise ValueError("CNN 的序列长度不能小于 7")
+    return selected
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="训练并评估 AiWaf-2 分类模型")
     parser.add_argument(
@@ -49,12 +83,32 @@ def parse_args():
         default=["all"],
         help="需要训练的模型，默认训练全部模型",
     )
-    parser.add_argument("--epochs", type=int, default=3, help="CNN 和 GRU 的训练轮数")
-    parser.add_argument("--seed", type=int, default=42, help="随机种子")
-    parser.add_argument("--max-features", type=int, default=10000, help="TF-IDF 最大特征数")
-    parser.add_argument("--max-vocab", type=int, default=20000, help="神经网络最大词表大小")
-    parser.add_argument("--sequence-length", type=int, default=200, help="神经网络输入序列长度")
-    return parser.parse_args()
+    parser.add_argument(
+        "--epochs", type=positive_integer, default=3, help="CNN 和 GRU 的训练轮数"
+    )
+    parser.add_argument("--seed", type=nonnegative_integer, default=42, help="随机种子")
+    parser.add_argument(
+        "--max-features", type=positive_integer, default=10000, help="TF-IDF 最大特征数"
+    )
+    parser.add_argument(
+        "--max-vocab", type=positive_integer, default=20000, help="神经网络最大词表大小"
+    )
+    parser.add_argument(
+        "--sequence-length", type=positive_integer, default=200, help="神经网络输入序列长度"
+    )
+    args = parser.parse_args()
+    try:
+        validate_training_options(
+            args.models,
+            args.epochs,
+            args.seed,
+            args.max_features,
+            args.max_vocab,
+            args.sequence_length,
+        )
+    except ValueError as error:
+        parser.error(str(error))
+    return args
 
 
 def train_models(
@@ -65,7 +119,9 @@ def train_models(
     max_vocab=20000,
     sequence_length=200,
 ):
-    selected = set(MODEL_NAMES if "all" in selected_models else selected_models)
+    selected = validate_training_options(
+        selected_models, epochs, seed, max_features, max_vocab, sequence_length
+    )
     random.seed(seed)
     np.random.seed(seed)
     if selected.intersection({"cnn", "gru"}):

@@ -16,6 +16,7 @@ import predict
 from predict import consensus_label, label_name
 from splitdata import _deduplicate
 from staticfeature import normalize_payload
+from trainmain import validate_training_options
 from vecmodel import FeaturePipeline
 
 
@@ -166,6 +167,20 @@ class ArtifactValidationTests(unittest.TestCase):
                 predict, "MANIFEST_PATH", manifest
             ), self.assertRaisesRegex(RuntimeError, "校验失败"):
                 predict.validate_artifacts({"rf"})
+
+
+class TrainingOptionTests(unittest.TestCase):
+    def test_all_cannot_be_combined_with_a_specific_model(self):
+        with self.assertRaisesRegex(ValueError, "不能与具体模型"):
+            validate_training_options(["all", "rf"], 3, 42, 100, 100, 20)
+
+    def test_cnn_rejects_a_sequence_shorter_than_its_kernels(self):
+        with self.assertRaisesRegex(ValueError, "不能小于 7"):
+            validate_training_options(["cnn"], 3, 42, 100, 100, 6)
+
+    def test_programmatic_training_rejects_nonpositive_sizes(self):
+        with self.assertRaisesRegex(ValueError, "必须大于 0"):
+            validate_training_options(["svm"], 3, 42, 0, 100, 20)
 
 
 if __name__ == "__main__":
