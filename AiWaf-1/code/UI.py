@@ -14,10 +14,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class WafUI:
-    def __init__(self, root, interface=None, port=80):
+    def __init__(self, root, interface=None, port=80, max_body_bytes=65536):
         self.root = root
         self.interface = interface
         self.port = port
+        self.max_body_bytes = max_body_bytes
         self.events = queue.Queue()
         self.stop_event = threading.Event()
         self.worker = None
@@ -85,11 +86,12 @@ class WafUI:
                     port=self.port,
                     timeout=1,
                     count=1,
+                    max_body_bytes=self.max_body_bytes,
                 )
                 for record in records:
-                    result = detector.predict([record["url"]])
+                    result = detector.predict([record["payload"]])
                     attack_type = (
-                        find_type(split_word(record["url"]))
+                        find_type(split_word(record["payload"]))
                         if result == "url为恶意攻击"
                         else "攻击类型：无"
                     )
@@ -107,7 +109,10 @@ class WafUI:
                 if event is None:
                     self.start_button.config(text="开始")
                     continue
-                self.result_list.delete(0, tk.END)
+                if self.result_list.size() > 500:
+                    self.result_list.delete(0, 100)
+                if self.result_list.size():
+                    self.result_list.insert(tk.END, "-" * 60)
                 for item in event:
                     self.result_list.insert(tk.END, item)
         except queue.Empty:
@@ -130,7 +135,7 @@ class WafUI:
         self.root.destroy()
 
 
-def UI_start(interface=None, port=80):
+def UI_start(interface=None, port=80, max_body_bytes=65536):
     root = tk.Tk()
-    WafUI(root, interface=interface, port=port)
+    WafUI(root, interface=interface, port=port, max_body_bytes=max_body_bytes)
     root.mainloop()

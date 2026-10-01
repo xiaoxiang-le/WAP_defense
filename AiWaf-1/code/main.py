@@ -16,6 +16,12 @@ def parse_args():
     parser.add_argument("--interface", help="抓包网卡名称；不指定时使用系统默认网卡")
     parser.add_argument("--port", type=int, default=80, help="监听的 HTTP TCP 端口")
     parser.add_argument(
+        "--max-body-bytes",
+        type=int,
+        default=65536,
+        help="最多读取的 HTTP 请求体字节数，默认 65536",
+    )
+    parser.add_argument(
         "--retrain",
         action="store_true",
         help="重新训练 AiWaf-1 分类模型后退出",
@@ -31,7 +37,15 @@ def main():
         return
     from UI import UI_start
 
-    UI_start(interface=args.interface, port=args.port)
+    if not 1 <= args.port <= 65535:
+        raise SystemExit("--port 必须在 1 到 65535 之间")
+    if args.max_body_bytes < 0:
+        raise SystemExit("--max-body-bytes 不能为负数")
+    UI_start(
+        interface=args.interface,
+        port=args.port,
+        max_body_bytes=args.max_body_bytes,
+    )
 
 
 if __name__ == "__main__":
