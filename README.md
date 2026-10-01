@@ -38,7 +38,7 @@ URL 解码、规范化与分词
 
 ## AiWaf-1：流量采集与桌面端检测
 
-AiWaf-1 使用 Scapy 监听 HTTP 请求，提取源/目标 IP、MAC 地址、请求方法、Host、Path、User-Agent 和受限长度的请求体等信息。请求 Payload 经字符 n-gram TF-IDF 表示后，由逻辑回归模型判断为正常或恶意请求；随后结合关键字规则标注 XSS 或 SQL 注入类型及风险等级，并在 Tkinter 界面中显示结果。抓包任务在后台线程中运行，并通过 TCP 会话重组降低请求跨包时的漏检概率。
+AiWaf-1 使用 Scapy 监听 HTTP 请求，提取源/目标 IPv4 或 IPv6 地址、MAC 地址、请求方法、Host、Path、User-Agent 和受限长度的请求体等信息。请求 Payload 经字符 n-gram TF-IDF 表示后，由逻辑回归模型判断为正常或恶意请求；随后结合关键字规则标注 XSS 或 SQL 注入类型及风险等级，并在 Tkinter 界面中显示结果。抓包任务在后台线程中运行，并通过 TCP 会话重组降低请求跨包时的漏检概率。
 
 网卡、端口和请求体读取上限可以通过 `--interface`、`--port` 与 `--max-body-bytes` 参数指定；不传网卡参数时使用系统默认接口。由于其分析对象是明文 HTTP 流量，因此不能直接解析 HTTPS 加密内容。
 
@@ -52,7 +52,7 @@ AiWaf-2 是项目的主要训练和实验模块。它从 XSS 与 SQL 注入数�
 - **SVM (支持向量机)**
 - **RF (随机森林)**
 
-训练完成后，模型与特征管线保存在 `AiWaf-2/model`，混淆矩阵保存在 `AiWaf-2/images`，完整指标写入 `training_metrics.json`。`model_manifest.json` 记录数据指纹、标签、特征参数及各模型 SHA-256，用于在预测和部分重训前校验产物是否配套。`predict.py` 会加载指定模型，对单条 Payload 分别给出预测结果；使用多个模型时还会输出多数投票的 `ENSEMBLE` 结果。
+训练时，新模型与特征管线先写入临时目录，只有全部选定模型训练成功后才发布到 `AiWaf-2/model`，因此中断训练不会提前覆盖可用产物。混淆矩阵保存在 `AiWaf-2/images`，完整指标写入 `training_metrics.json`。`model_manifest.json` 记录数据指纹、标签、特征参数及各模型 SHA-256，用于在预测和部分重训前校验产物是否配套。`predict.py` 会加载指定模型，对单条 Payload 分别给出预测结果；使用多个模型时还会输出多数投票的 `ENSEMBLE` 结果。
 
 ### 检测流程
 
@@ -92,7 +92,7 @@ cd AiWaf-2\code
 python trainmain.py --models all --epochs 3 --seed 42
 ```
 
-首次训练或修改数据、随机种子、`--max-features`、`--max-vocab`、`--sequence-length` 后必须使用 `--models all` 全量训练。产物校验通过时，可以使用 `--models rf svm` 只更新指定模型；已有其他模型和指标不会被覆盖。
+首次训练或修改数据、随机种子、`--max-features`、`--max-vocab`、`--sequence-length` 后必须使用 `--models all` 全量训练。产物校验通过时，可以使用 `--models rf svm` 只更新指定模型；已有其他模型和指标不会被覆盖。仅选择 RF、KNN 或 SVM 时不会加载 TensorFlow，可减少传统模型命令的启动时间和内存占用。
 
 使用已有模型进行预测：
 
