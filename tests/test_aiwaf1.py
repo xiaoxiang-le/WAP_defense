@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scapy.all import Ether, IP, Raw, TCP
+from scapy.layers.inet6 import IPv6
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -91,6 +92,23 @@ class CaptureConfigurationTests(unittest.TestCase):
         self.assertEqual("example.test/login", record["url"])
         self.assertEqual("name=admin&query=<sc", record["body"])
         self.assertIn(record["body"], record["payload"])
+
+    def test_ipv6_addresses_are_included_in_the_record(self):
+        packet = (
+            IPv6(src="2001:db8::1", dst="2001:db8::2")
+            / TCP(sport=12345, dport=8080)
+            / geturl.http.HTTP()
+            / geturl.http.HTTPRequest(
+                Method=b"GET",
+                Host=b"example.test",
+                Path=b"/status",
+            )
+        )
+
+        record = geturl.packet_to_record(packet)
+
+        self.assertIn("IP_Src：2001:db8::1", record["display"])
+        self.assertIn("IP_Dst：2001:db8::2", record["display"])
 
 
 if __name__ == "__main__":

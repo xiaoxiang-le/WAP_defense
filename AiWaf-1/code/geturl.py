@@ -1,6 +1,7 @@
 from urllib.parse import unquote
 
 from scapy.all import Ether, IP, Raw, TCP, bind_layers, sniff
+from scapy.layers.inet6 import IPv6
 from scapy.sessions import TCPSession
 
 try:
@@ -15,6 +16,14 @@ def _decode(value):
     return str(value or "")
 
 
+def _ip_addresses(packet):
+    if packet.haslayer(IP):
+        return _decode(packet[IP].src), _decode(packet[IP].dst)
+    if packet.haslayer(IPv6):
+        return _decode(packet[IPv6].src), _decode(packet[IPv6].dst)
+    return "", ""
+
+
 def packet_to_record(packet, max_body_bytes=65536):
     if not packet.haslayer(TCP) or not packet.haslayer(http.HTTPRequest):
         return None
@@ -26,8 +35,7 @@ def packet_to_record(packet, max_body_bytes=65536):
     if not url:
         return None
 
-    source_ip = _decode(packet[IP].src) if packet.haslayer(IP) else ""
-    target_ip = _decode(packet[IP].dst) if packet.haslayer(IP) else ""
+    source_ip, target_ip = _ip_addresses(packet)
     source_mac = _decode(packet[Ether].src) if packet.haslayer(Ether) else ""
     target_mac = _decode(packet[Ether].dst) if packet.haslayer(Ether) else ""
     method = _decode(getattr(request, "Method", b""))
