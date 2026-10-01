@@ -1,2 +1,66 @@
+# Python bytecode and caches
 __pycache__/
 *.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# Coverage and test reports
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+junit.xml
+
+# Virtual environments and local configuration
+.venv/
+venv/
+env/
+.conda/
+.env
+.env.*
+!.env.example
+
+# Packaging and build output
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Runtime logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.pid
+
+# Packet captures can be large and may contain sensitive traffic
+*.pcap
+*.pcapng
+
+# Training checkpoints and experiment caches
+checkpoints/
+**/checkpoints/
+*.ckpt
+*.ckpt.*
+tensorboard/
+**/logs/
+.keras/
+
+# Jupyter temporary files
+.ipynb_checkpoints/
