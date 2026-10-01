@@ -24,6 +24,7 @@ class CNNModel:
         vocab_size,
         sequence_length,
         epochs=3,
+        model_path=MODEL_PATH,
     ):
         self.train_data = train_data
         self.train_labels = np.asarray(train_labels)
@@ -34,6 +35,7 @@ class CNNModel:
         self.vocab_size = vocab_size
         self.sequence_length = sequence_length
         self.epochs = epochs
+        self.model_path = Path(model_path)
 
     def train(self):
         model = Sequential(
@@ -66,7 +68,7 @@ class CNNModel:
             callbacks=[EarlyStopping(patience=2, restore_best_weights=True)],
             verbose=2,
         )
-        atomic_keras_save(model, MODEL_PATH)
+        atomic_keras_save(model, self.model_path)
         predictions = np.argmax(model.predict(self.test_data, verbose=0), axis=1)
         return evaluate_predictions("CNN", self.test_labels, predictions)
 

@@ -16,6 +16,7 @@ import predict
 from predict import consensus_label, label_name
 from splitdata import _deduplicate
 from staticfeature import normalize_payload
+import trainmain
 from trainmain import validate_training_options
 from vecmodel import FeaturePipeline
 
@@ -181,6 +182,33 @@ class TrainingOptionTests(unittest.TestCase):
     def test_programmatic_training_rejects_nonpositive_sizes(self):
         with self.assertRaisesRegex(ValueError, "必须大于 0"):
             validate_training_options(["svm"], 3, 42, 0, 100, 20)
+
+
+class ArtifactPromotionTests(unittest.TestCase):
+    def test_staged_artifacts_replace_existing_files_only_when_promoted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            model_dir = root / "model"
+            staging_dir = root / "staging"
+            model_dir.mkdir()
+            staging_dir.mkdir()
+            pipeline_path = model_dir / "feature_pipeline.pkl"
+            model_path = model_dir / "mult_rf.pkl"
+            pipeline_path.write_bytes(b"old-pipeline")
+            model_path.write_bytes(b"old-model")
+            (staging_dir / pipeline_path.name).write_bytes(b"new-pipeline")
+            (staging_dir / model_path.name).write_bytes(b"new-model")
+
+            self.assertEqual(b"old-model", model_path.read_bytes())
+            with patch.object(trainmain, "MODEL_DIR", model_dir), patch.object(
+                trainmain, "PIPELINE_PATH", pipeline_path
+            ):
+                trainmain._promote_artifacts(
+                    staging_dir, {"rf"}, include_pipeline=True
+                )
+
+            self.assertEqual(b"new-pipeline", pipeline_path.read_bytes())
+            self.assertEqual(b"new-model", model_path.read_bytes())
 
 
 if __name__ == "__main__":
