@@ -5,6 +5,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 from tensorflow.keras.layers import Conv1D, Dense, Dropout, Embedding, GlobalMaxPooling1D
 from tensorflow.keras.models import Sequential
 
+from artifacts import atomic_keras_save
 from evaluate import evaluate_predictions
 
 
@@ -65,7 +66,7 @@ class CNNModel:
             callbacks=[EarlyStopping(patience=2, restore_best_weights=True)],
             verbose=2,
         )
-        model.save(MODEL_PATH)
+        atomic_keras_save(model, MODEL_PATH)
         predictions = np.argmax(model.predict(self.test_data, verbose=0), axis=1)
         return evaluate_predictions("CNN", self.test_labels, predictions)
 

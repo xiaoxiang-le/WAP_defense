@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-10-01T12:10:12.976753+00:00",
+  "dataset": {
+    "dataset_fingerprint": "d2fe69ae8b402c9dd574818076f3925fef3205e2ecbaef7f948db0b0c0eea4ed",
+    "raw_sample_count": 44177,
+    "sample_count": 36516,
+    "train_count": 21909,
+    "validation_count": 7303,
+    "test_count": 7304
+  },
+  "seed": 42,
+  "labels": [
+    "正常",
+    "XSS攻击",
+    "SQL注入攻击"
+  ],
+  "feature_configuration": {
+    "max_features": 10000,
+    "max_vocab": 20000,
+    "sequence_length": 200
+  },
+  "pipeline": {
+    "filename": "feature_pipeline.pkl",
+    "sha256": "ac4e1a5c07dda952e6f76d39d5c426a84990ade118b564238cdefb0dd2286685"
+  },
+  "models": {
+    "rf": {
+      "filename": "mult_rf.pkl",
+      "sha256": "c8c23faac91de94a49ab2afc23e5bf1765e89a550ab5e33ad5314d148fd09e87"
+    },
+    "svm": {
+      "filename": "mult_svm.pkl",
+      "sha256": "1d00a4b2ca02277b78e21cdc36fcc6f0b37d4a4eeeb2f679e6d7c1f1cb3cb3af"
+    },
+    "cnn": {
+      "filename": "mult_cnn.keras",
+      "sha256": "17844f0f425c05ecd017a727365efde8cceffc214e6bbc172e89b855fd189d6c"
+    },
+    "knn": {
+      "filename": "mult_knn.pkl",
+      "sha256": "fee41994b297776b20f4bb99377892cbfd9ac625d75b1c16f986a6312d5fbd91"
+    },
+    "gru": {
+      "filename": "gru.keras",
+      "sha256": "9f444fd3e19a30c6dd04110b485aac31f537b085358651e34a437246d1f9b524"
+    }
+  }
+}

@@ -1,12 +1,18 @@
 import argparse
-import json
 import random
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
 import tensorflow as tf
 
+from artifacts import (
+    MANIFEST_SCHEMA_VERSION,
+    atomic_json_dump,
+    load_json,
+    sha256_file,
+)
 from cnn import CNNModel
 from gru import GRUModel
 from knn import KNNModel
@@ -18,7 +24,16 @@ from vecmodel import FeaturePipeline
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 METRICS_PATH = BASE_DIR / "model" / "training_metrics.json"
+MANIFEST_PATH = BASE_DIR / "model" / "model_manifest.json"
+PIPELINE_PATH = BASE_DIR / "model" / "feature_pipeline.pkl"
 MODEL_NAMES = ("rf", "knn", "svm", "cnn", "gru")
+MODEL_FILES = {
+    "rf": "mult_rf.pkl",
+    "knn": "mult_knn.pkl",
+    "svm": "mult_svm.pkl",
+    "cnn": "mult_cnn.keras",
+    "gru": "gru.keras",
+}
 
 
 def configure_console_encoding():
@@ -64,19 +79,32 @@ def train_models(
         validation_labels,
         test_payloads,
         test_labels,
-    ) = splitmain(seed=seed)
-
-    pipeline = FeaturePipeline(
-        max_features=max_features,
-        max_vocab=max_vocab,
-        sequence_length=sequence_length,
-    )
-    print("正在拟合 TF-IDF 和序列词表...")
-    pipeline.fit(train_payloads)
-    pipeline.save()
+        dataset_metadata,
+    ) = splitmain(seed=seed, return_metadata=True)
 
     selected = set(MODEL_NAMES if "all" in selected_models else selected_models)
-    metrics = {}
+    configuration = {
+        "max_features": max_features,
+        "max_vocab": max_vocab,
+        "sequence_length": sequence_length,
+    }
+    full_retrain = selected == set(MODEL_NAMES)
+
+    if full_retrain:
+        pipeline = FeaturePipeline(**configuration)
+        print("正在拟合 TF-IDF 和序列词表...")
+        pipeline.fit(train_payloads)
+        pipeline.save(PIPELINE_PATH)
+        metrics = {}
+        manifest_models = {}
+    else:
+        pipeline, previous_manifest = _load_reusable_pipeline(
+            dataset_metadata=dataset_metadata,
+            seed=seed,
+            configuration=configuration,
+        )
+        metrics = load_json(METRICS_PATH) if METRICS_PATH.exists() else {}
+        manifest_models = dict(previous_manifest.get("models", {}))
 
     traditional = selected.intersection({"rf", "knn", "svm"})
     if traditional:
@@ -117,13 +145,62 @@ def train_models(
         if "gru" in selected:
             metrics["gru"] = GRUModel(*neural_arguments, epochs=epochs).train()
 
-    METRICS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    METRICS_PATH.write_text(
-        json.dumps(metrics, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    for model_name in selected:
+        filename = MODEL_FILES[model_name]
+        manifest_models[model_name] = {
+            "filename": filename,
+            "sha256": sha256_file(BASE_DIR / "model" / filename),
+        }
+
+    manifest = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "dataset": dataset_metadata,
+        "seed": seed,
+        "labels": ["正常", "XSS攻击", "SQL注入攻击"],
+        "feature_configuration": configuration,
+        "pipeline": {
+            "filename": PIPELINE_PATH.name,
+            "sha256": sha256_file(PIPELINE_PATH),
+        },
+        "models": manifest_models,
+    }
+    atomic_json_dump(metrics, METRICS_PATH)
+    atomic_json_dump(manifest, MANIFEST_PATH)
     print("\n训练完成，评估结果已保存至 {}".format(METRICS_PATH))
     return metrics
+
+
+def _load_reusable_pipeline(dataset_metadata, seed, configuration):
+    if not MANIFEST_PATH.exists():
+        raise RuntimeError("缺少模型 manifest；请先使用 --models all 完成全量训练")
+
+    manifest = load_json(MANIFEST_PATH)
+    expected = {
+        "schema_version": MANIFEST_SCHEMA_VERSION,
+        "dataset_fingerprint": dataset_metadata["dataset_fingerprint"],
+        "seed": seed,
+        "feature_configuration": configuration,
+    }
+    actual = {
+        "schema_version": manifest.get("schema_version"),
+        "dataset_fingerprint": manifest.get("dataset", {}).get("dataset_fingerprint"),
+        "seed": manifest.get("seed"),
+        "feature_configuration": manifest.get("feature_configuration"),
+    }
+    if actual != expected:
+        raise RuntimeError(
+            "数据、随机种子或特征参数已变化；请使用 --models all 重新生成全部模型"
+        )
+
+    pipeline_entry = manifest.get("pipeline", {})
+    if (
+        pipeline_entry.get("filename") != PIPELINE_PATH.name
+        or not PIPELINE_PATH.exists()
+        or sha256_file(PIPELINE_PATH) != pipeline_entry.get("sha256")
+    ):
+        raise RuntimeError("特征管线缺失或校验失败；请使用 --models all 重新训练")
+    return FeaturePipeline.load(PIPELINE_PATH), manifest
 
 
 def main():

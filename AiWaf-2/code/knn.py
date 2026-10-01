@@ -1,8 +1,8 @@
 from pathlib import Path
 
-import joblib
 from sklearn.neighbors import KNeighborsClassifier
 
+from artifacts import atomic_joblib_dump
 from evaluate import evaluate_predictions
 
 
@@ -26,8 +26,7 @@ class KNNModel:
         )
         print("[KNN] 开始训练")
         model.fit(self.train_data, self.train_labels)
-        MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(model, MODEL_PATH)
+        atomic_joblib_dump(model, MODEL_PATH)
         predictions = model.predict(self.test_data)
         return evaluate_predictions("KNN", self.test_labels, predictions)
 

@@ -6,6 +6,7 @@ from keras_preprocessing.text import Tokenizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 from staticfeature import GeneSeg, normalize_payload
+from artifacts import atomic_joblib_dump
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -55,8 +56,7 @@ class FeaturePipeline:
 
     def save(self, filename=DEFAULT_PIPELINE_PATH):
         path = Path(filename)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(self, path)
+        atomic_joblib_dump(self, path)
 
     @classmethod
     def load(cls, filename=DEFAULT_PIPELINE_PATH):
