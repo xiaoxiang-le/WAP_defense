@@ -4,12 +4,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from scapy.all import Ether, IP, Raw, TCP
+
 
 ROOT = Path(__file__).resolve().parents[1]
 CODE_DIR = ROOT / "AiWaf-1" / "code"
 sys.path.insert(0, str(CODE_DIR))
 
-from train_url import split_word
+from train_url import _deduplicate_samples, normalize_url, split_word
 import geturl
 
 
@@ -43,6 +45,14 @@ class AttackRuleTests(unittest.TestCase):
         result = self.rules.find_type(split_word("/products/list"))
         self.assertIn("未知", result)
 
+    def test_training_deduplicates_normalized_urls_and_drops_conflicts(self):
+        payloads, labels = _deduplicate_samples(
+            ["/item?id=1", "/ITEM?id=2", "/safe", "/SAFE"],
+            [1, 1, 0, 1],
+        )
+        self.assertEqual([normalize_url("/item?id=1")], [normalize_url(x) for x in payloads])
+        self.assertEqual([1], labels)
+
 
 class CaptureConfigurationTests(unittest.TestCase):
     def test_custom_port_is_bound_and_filtered(self):
@@ -59,6 +69,28 @@ class CaptureConfigurationTests(unittest.TestCase):
         self.assertEqual("tcp port 18080", options["filter"])
         self.assertEqual("test-interface", options["iface"])
         self.assertTrue(callable(options["lfilter"]))
+        self.assertIn("session", options)
+
+    def test_post_body_is_included_and_limited(self):
+        packet = (
+            Ether()
+            / IP(src="127.0.0.1", dst="127.0.0.1")
+            / TCP(sport=12345, dport=8080)
+            / geturl.http.HTTP()
+            / geturl.http.HTTPRequest(
+                Method=b"POST",
+                Host=b"example.test",
+                Path=b"/login",
+                Content_Type=b"application/x-www-form-urlencoded",
+            )
+            / Raw(load=b"name=admin&query=<script>alert(1)</script>")
+        )
+
+        record = geturl.packet_to_record(packet, max_body_bytes=20)
+
+        self.assertEqual("example.test/login", record["url"])
+        self.assertEqual("name=admin&query=<sc", record["body"])
+        self.assertIn(record["body"], record["payload"])
 
 
 if __name__ == "__main__":

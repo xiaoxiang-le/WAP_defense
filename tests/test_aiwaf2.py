@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -10,7 +11,11 @@ CODE_DIR = ROOT / "AiWaf-2" / "code"
 sys.path.insert(0, str(CODE_DIR))
 
 from loaddata import NORMAL, SQL_INJECTION, XSS, loaddata_sqli, loaddata_xss
+from artifacts import atomic_json_dump, sha256_file
+import predict
 from predict import consensus_label, label_name
+from splitdata import _deduplicate
+from staticfeature import normalize_payload
 from vecmodel import FeaturePipeline
 
 
@@ -49,6 +54,17 @@ class DataLoadingTests(unittest.TestCase):
 
         self.assertEqual([NORMAL, XSS], labels)
 
+    def test_deduplication_uses_the_model_normalization(self):
+        payloads, labels = _deduplicate(
+            ["/item?id=1", "/ITEM?id=2", "/safe", "/SAFE"],
+            [SQL_INJECTION, SQL_INJECTION, NORMAL, XSS],
+        )
+        self.assertEqual(
+            [normalize_payload("/item?id=1")],
+            [normalize_payload(payload) for payload in payloads],
+        )
+        self.assertEqual([SQL_INJECTION], labels)
+
 
 class FeaturePipelineTests(unittest.TestCase):
     def test_both_representations_have_expected_shape(self):
@@ -85,6 +101,71 @@ class FeaturePipelineTests(unittest.TestCase):
             "模型意见不一致",
             consensus_label({"rf": "正常", "svm": "SQL注入攻击"}),
         )
+
+
+class ArtifactValidationTests(unittest.TestCase):
+    def test_manifest_accepts_matching_pipeline_and_model_hashes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            model_dir = Path(directory)
+            pipeline = model_dir / "feature_pipeline.pkl"
+            model = model_dir / "mult_rf.pkl"
+            pipeline.write_bytes(b"pipeline")
+            model.write_bytes(b"model")
+            manifest = model_dir / "model_manifest.json"
+            atomic_json_dump(
+                {
+                    "schema_version": 1,
+                    "labels": ["正常", "XSS攻击", "SQL注入攻击"],
+                    "pipeline": {
+                        "filename": pipeline.name,
+                        "sha256": sha256_file(pipeline),
+                    },
+                    "models": {
+                        "rf": {
+                            "filename": model.name,
+                            "sha256": sha256_file(model),
+                        }
+                    },
+                },
+                manifest,
+            )
+
+            with patch.object(predict, "MODEL_DIR", model_dir), patch.object(
+                predict, "MANIFEST_PATH", manifest
+            ):
+                self.assertEqual(pipeline, predict.validate_artifacts({"rf"}))
+
+    def test_manifest_rejects_a_modified_model(self):
+        with tempfile.TemporaryDirectory() as directory:
+            model_dir = Path(directory)
+            pipeline = model_dir / "feature_pipeline.pkl"
+            model = model_dir / "mult_rf.pkl"
+            pipeline.write_bytes(b"pipeline")
+            model.write_bytes(b"original")
+            manifest = model_dir / "model_manifest.json"
+            atomic_json_dump(
+                {
+                    "schema_version": 1,
+                    "labels": ["正常", "XSS攻击", "SQL注入攻击"],
+                    "pipeline": {
+                        "filename": pipeline.name,
+                        "sha256": sha256_file(pipeline),
+                    },
+                    "models": {
+                        "rf": {
+                            "filename": model.name,
+                            "sha256": sha256_file(model),
+                        }
+                    },
+                },
+                manifest,
+            )
+            model.write_bytes(b"modified")
+
+            with patch.object(predict, "MODEL_DIR", model_dir), patch.object(
+                predict, "MANIFEST_PATH", manifest
+            ), self.assertRaisesRegex(RuntimeError, "校验失败"):
+                predict.validate_artifacts({"rf"})
 
 
 if __name__ == "__main__":
