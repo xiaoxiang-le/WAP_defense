@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
-import tensorflow as tf
 
 from artifacts import (
     MANIFEST_SCHEMA_VERSION,
@@ -13,8 +12,6 @@ from artifacts import (
     load_json,
     sha256_file,
 )
-from cnn import CNNModel
-from gru import GRUModel
 from knn import KNNModel
 from rf import RFModel
 from splitdata import splitmain
@@ -68,9 +65,13 @@ def train_models(
     max_vocab=20000,
     sequence_length=200,
 ):
+    selected = set(MODEL_NAMES if "all" in selected_models else selected_models)
     random.seed(seed)
     np.random.seed(seed)
-    tf.keras.utils.set_random_seed(seed)
+    if selected.intersection({"cnn", "gru"}):
+        import tensorflow as tf
+
+        tf.keras.utils.set_random_seed(seed)
 
     (
         train_payloads,
@@ -82,7 +83,6 @@ def train_models(
         dataset_metadata,
     ) = splitmain(seed=seed, return_metadata=True)
 
-    selected = set(MODEL_NAMES if "all" in selected_models else selected_models)
     configuration = {
         "max_features": max_features,
         "max_vocab": max_vocab,
@@ -126,6 +126,9 @@ def train_models(
 
     neural = selected.intersection({"cnn", "gru"})
     if neural:
+        from cnn import CNNModel
+        from gru import GRUModel
+
         train_sequence = pipeline.transform_sequence(train_payloads)
         validation_sequence = pipeline.transform_sequence(validation_payloads)
         test_sequence = pipeline.transform_sequence(test_payloads)
