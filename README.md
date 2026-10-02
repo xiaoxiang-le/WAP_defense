@@ -157,6 +157,9 @@ python main.py --port 8080 --log-file ..\logs\detections.jsonl
 
 # 显式记录请求体（请求体可能包含密码、令牌等敏感信息）
 python main.py --port 8080 --log-file ..\logs\detections.jsonl --log-body
+
+# 降低阈值可提高检测灵敏度，升高阈值可减少误报
+python main.py --port 8080 --threshold 0.65
 ```
 
 ### 运行测试

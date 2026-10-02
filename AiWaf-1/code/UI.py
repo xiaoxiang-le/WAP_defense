@@ -23,12 +23,14 @@ class WafUI:
         max_body_bytes=65536,
         log_file=None,
         log_body=False,
+        threshold=0.5,
     ):
         self.root = root
         self.interface = interface
         self.port = port
         self.max_body_bytes = max_body_bytes
         self.logger = JsonlDetectionLogger(log_file, log_body) if log_file else None
+        self.threshold = threshold
         self.events = queue.Queue()
         self.stop_event = threading.Event()
         self.worker = None
@@ -54,9 +56,10 @@ class WafUI:
         interface_text = self.interface or "系统默认网卡"
         tk.Label(
             info_frame,
-            text="监听接口：{}    HTTP 端口：{}    日志：{}".format(
+            text="监听接口：{}    HTTP 端口：{}    阈值：{:.0%}    日志：{}".format(
                 interface_text,
                 self.port,
+                self.threshold,
                 self.logger.path if self.logger else "关闭",
             ),
         ).pack(pady=6)
@@ -103,7 +106,13 @@ class WafUI:
                     max_body_bytes=self.max_body_bytes,
                 )
                 for record in records:
-                    result = detector.predict([record["payload"]])
+                    detail = detector.predict_details(
+                        [record["payload"]], threshold=self.threshold
+                    )[0]
+                    result = detail["message"]
+                    probability_text = "恶意概率：{:.2%}".format(
+                        detail["malicious_probability"]
+                    )
                     attack_type = (
                         find_type(split_word(record["payload"]))
                         if result == "url为恶意攻击"
@@ -111,11 +120,19 @@ class WafUI:
                     )
                     if self.logger:
                         try:
-                            self.logger.write(record, result, attack_type)
+                            self.logger.write(
+                                record,
+                                result,
+                                attack_type,
+                                malicious_probability=detail["malicious_probability"],
+                            )
                         except OSError as error:
                             self.events.put(["日志写入失败：{}".format(error)])
                             self.logger = None
-                    self.events.put(record["display"] + [result, attack_type])
+                    self.events.put(
+                        record["display"]
+                        + [probability_text, result, attack_type]
+                    )
         except Exception as error:
             self.events.put(["检测停止：{}".format(error)])
         finally:
@@ -161,6 +178,7 @@ def UI_start(
     max_body_bytes=65536,
     log_file=None,
     log_body=False,
+    threshold=0.5,
 ):
     root = tk.Tk()
     WafUI(
@@ -170,5 +188,6 @@ def UI_start(
         max_body_bytes=max_body_bytes,
         log_file=log_file,
         log_body=log_body,
+        threshold=threshold,
     )
     root.mainloop()

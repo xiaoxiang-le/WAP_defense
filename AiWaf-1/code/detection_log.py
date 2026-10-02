@@ -10,7 +10,7 @@ class JsonlDetectionLogger:
         self.include_body = include_body
         self._lock = threading.Lock()
 
-    def write(self, record, classification, risk):
+    def write(self, record, classification, risk, malicious_probability=None):
         event = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "source_ip": record.get("source_ip", ""),
@@ -23,6 +23,8 @@ class JsonlDetectionLogger:
             "classification": classification,
             "risk": risk,
         }
+        if malicious_probability is not None:
+            event["malicious_probability"] = float(malicious_probability)
         if self.include_body:
             event["body"] = record.get("body", "")
 

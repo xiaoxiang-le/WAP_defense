@@ -32,9 +32,17 @@ def parse_args():
         action="store_true",
         help="在 JSONL 日志中记录请求体；可能包含敏感信息",
     )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="判定恶意请求的概率阈值，范围 0 到 1，默认 0.5",
+    )
     args = parser.parse_args()
     if args.log_body and not args.log_file:
         parser.error("--log-body 必须与 --log-file 一起使用")
+    if not 0 <= args.threshold <= 1:
+        parser.error("--threshold 必须在 0 到 1 之间")
     return args
 
 
@@ -56,6 +64,7 @@ def main():
         max_body_bytes=args.max_body_bytes,
         log_file=args.log_file,
         log_body=args.log_body,
+        threshold=args.threshold,
     )
 
 

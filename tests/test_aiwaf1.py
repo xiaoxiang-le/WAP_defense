@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CODE_DIR = ROOT / "AiWaf-1" / "code"
 sys.path.insert(0, str(CODE_DIR))
 
-from train_url import _deduplicate_samples, normalize_url, split_word
+from train_url import Train, _deduplicate_samples, normalize_url, split_word
 from detection_log import JsonlDetectionLogger
 import geturl
 
@@ -56,6 +56,40 @@ class AttackRuleTests(unittest.TestCase):
         )
         self.assertEqual([normalize_url("/item?id=1")], [normalize_url(x) for x in payloads])
         self.assertEqual([1], labels)
+
+
+class PredictionThresholdTests(unittest.TestCase):
+    class FakeVectorizer:
+        @staticmethod
+        def transform(urls):
+            return urls
+
+    class FakeClassifier:
+        classes_ = [0, 1]
+
+        @staticmethod
+        def predict_proba(vectors):
+            return [[0.3, 0.7] if value == "attack" else [0.8, 0.2] for value in vectors]
+
+    def setUp(self):
+        self.detector = Train()
+        self.detector.vectorizer = self.FakeVectorizer()
+        self.detector.classifier = self.FakeClassifier()
+
+    def test_threshold_controls_classification_and_reports_probability(self):
+        details = self.detector.predict_details(["safe", "attack"], threshold=0.75)
+
+        self.assertEqual([0, 0], [item["label"] for item in details])
+        self.assertEqual(0.7, details[1]["malicious_probability"])
+        self.assertEqual(
+            "url为恶意攻击", self.detector.predict(["attack"], threshold=0.6)
+        )
+
+    def test_invalid_threshold_and_empty_prediction_are_rejected(self):
+        with self.assertRaises(ValueError):
+            self.detector.predict_details(["payload"], threshold=1.1)
+        with self.assertRaises(ValueError):
+            self.detector.predict([])
 
 
 class CaptureConfigurationTests(unittest.TestCase):
@@ -132,12 +166,14 @@ class DetectionLogTests(unittest.TestCase):
                 },
                 "url为恶意攻击",
                 "攻击类型：SQL注入  攻击等级：严重",
+                malicious_probability=0.9,
             )
             event = json.loads(path.read_text(encoding="utf-8"))
 
         self.assertNotIn("body", event)
         self.assertEqual("POST", event["method"])
         self.assertEqual("url为恶意攻击", event["classification"])
+        self.assertEqual(0.9, event["malicious_probability"])
 
     def test_log_can_include_request_body_explicitly(self):
         with tempfile.TemporaryDirectory() as directory:

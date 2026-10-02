@@ -109,9 +109,33 @@ class Train:
         vectors = self.vectorizer.transform([str(url) for url in urls])
         return self.classifier.predict(vectors)
 
-    def predict(self, urls):
-        label = int(self.predict_labels(urls)[0])
-        return "url为正常请求" if label == 0 else "url为恶意攻击"
+    def predict_details(self, urls, threshold=0.5):
+        if not 0 <= threshold <= 1:
+            raise ValueError("恶意判定阈值必须在 0 到 1 之间")
+        urls = [str(url) for url in urls]
+        if not urls:
+            return []
+        vectors = self.vectorizer.transform(urls)
+        probabilities = self.classifier.predict_proba(vectors)
+        malicious_index = list(self.classifier.classes_).index(1)
+        details = []
+        for row in probabilities:
+            probability = float(row[malicious_index])
+            label = int(probability >= threshold)
+            details.append(
+                {
+                    "label": label,
+                    "malicious_probability": probability,
+                    "message": "url为正常请求" if label == 0 else "url为恶意攻击",
+                }
+            )
+        return details
+
+    def predict(self, urls, threshold=0.5):
+        details = self.predict_details(urls, threshold=threshold)
+        if not details:
+            raise ValueError("至少需要一个待检测 URL")
+        return details[0]["message"]
 
 
 def _deduplicate_samples(payloads, labels):
