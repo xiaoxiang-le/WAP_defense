@@ -1,5 +1,6 @@
 import argparse
 from collections import Counter
+import json
 from pathlib import Path
 import sys
 
@@ -74,39 +75,100 @@ def validate_artifacts(selected_models):
     return pipeline_path
 
 
-def predict(payload, selected_models=("all",)):
-    selected = set(MODEL_NAMES if "all" in selected_models else selected_models)
-    pipeline_path = validate_artifacts(selected)
-    pipeline = FeaturePipeline.load(pipeline_path)
-    results = {}
+def normalize_model_selection(selected_models):
+    if "all" in selected_models:
+        if len(selected_models) != 1:
+            raise ValueError("all 不能与具体模型同时使用")
+        return set(MODEL_NAMES)
+    selected = set(selected_models)
+    if not selected:
+        raise ValueError("至少需要选择一个模型")
+    unknown = selected.difference(MODEL_NAMES)
+    if unknown:
+        raise ValueError("未知模型：{}".format(", ".join(sorted(unknown))))
+    return selected
 
-    if selected.intersection({"rf", "knn", "svm"}):
-        tfidf = pipeline.transform_tfidf([payload])
+
+class PredictionEngine:
+    def __init__(self, selected_models=("all",)):
+        self.selected = normalize_model_selection(selected_models)
+        pipeline_path = validate_artifacts(self.selected)
+        self.pipeline = FeaturePipeline.load(pipeline_path)
+        self.models = {}
+
         for model_name in ("rf", "knn", "svm"):
-            if model_name in selected:
-                model = joblib.load(MODEL_DIR / MODEL_FILES[model_name])
-                results[model_name] = label_name(model.predict(tfidf)[0])
-
-    if selected.intersection({"cnn", "gru"}):
-        from tensorflow import keras
-
-        payload_sequence = pipeline.transform_sequence([payload])
-        for model_name in ("cnn", "gru"):
-            if model_name in selected:
-                model = keras.models.load_model(
-                    MODEL_DIR / MODEL_FILES[model_name], compile=False
+            if model_name in self.selected:
+                self.models[model_name] = joblib.load(
+                    MODEL_DIR / MODEL_FILES[model_name]
                 )
-                probabilities = model.predict(payload_sequence, verbose=0)[0]
-                results[model_name] = label_name(np.argmax(probabilities))
 
-    if len(results) > 1:
-        results["ensemble"] = consensus_label(results)
-    return results
+        if self.selected.intersection({"cnn", "gru"}):
+            from tensorflow import keras
+
+            for model_name in ("cnn", "gru"):
+                if model_name in self.selected:
+                    self.models[model_name] = keras.models.load_model(
+                        MODEL_DIR / MODEL_FILES[model_name], compile=False
+                    )
+
+    def predict_many(self, payloads):
+        payloads = list(payloads)
+        if not payloads:
+            return []
+        results = [{} for _ in payloads]
+
+        traditional = self.selected.intersection({"rf", "knn", "svm"})
+        if traditional:
+            tfidf = self.pipeline.transform_tfidf(payloads)
+            for model_name in ("rf", "knn", "svm"):
+                if model_name in traditional:
+                    labels = self.models[model_name].predict(tfidf)
+                    for result, label in zip(results, labels):
+                        result[model_name] = label_name(label)
+
+        neural = self.selected.intersection({"cnn", "gru"})
+        if neural:
+            sequences = self.pipeline.transform_sequence(payloads)
+            for model_name in ("cnn", "gru"):
+                if model_name in neural:
+                    probabilities = self.models[model_name].predict(
+                        sequences, verbose=0
+                    )
+                    labels = np.argmax(probabilities, axis=1)
+                    for result, label in zip(results, labels):
+                        result[model_name] = label_name(label)
+
+        if len(self.selected) > 1:
+            for result in results:
+                result["ensemble"] = consensus_label(result)
+        return results
+
+
+def predict(payload, selected_models=("all",)):
+    return PredictionEngine(selected_models).predict_many([payload])[0]
+
+
+def load_payloads(payload=None, input_file=None):
+    if input_file:
+        lines = Path(input_file).read_text(encoding="utf-8").splitlines()
+        payloads = [line for line in lines if line.strip()]
+        if not payloads:
+            raise ValueError("输入文件中没有可预测的 Payload")
+        return payloads
+    return [payload if payload is not None else DEFAULT_PAYLOAD]
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="使用 AiWaf-2 模型检测请求 Payload")
-    parser.add_argument("payload", nargs="?", default=DEFAULT_PAYLOAD, help="待检测的 URL 或 Payload")
+    parser.add_argument("payload", nargs="?", help="待检测的 URL 或 Payload")
+    parser.add_argument(
+        "--input-file",
+        type=Path,
+        help="批量输入文件，每行一个 Payload；不能与位置参数同时使用",
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="以 JSON 格式输出预测结果"
+    )
     parser.add_argument(
         "--models",
         nargs="+",
@@ -114,18 +176,37 @@ def parse_args():
         default=["all"],
         help="参与预测的模型，默认使用全部模型",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.input_file and args.payload is not None:
+        parser.error("payload 位置参数不能与 --input-file 同时使用")
+    try:
+        normalize_model_selection(args.models)
+    except ValueError as error:
+        parser.error(str(error))
+    return args
 
 
 def main():
     configure_console_encoding()
     args = parse_args()
     try:
-        results = predict(args.payload, args.models)
-    except (OSError, ValueError, RuntimeError) as error:
+        payloads = load_payloads(args.payload, args.input_file)
+        predictions = PredictionEngine(args.models).predict_many(payloads)
+    except (OSError, UnicodeError, ValueError, RuntimeError) as error:
         raise SystemExit("预测失败：{}".format(error))
-    for model_name, result in results.items():
-        print("{} 模型预测结果：{}".format(model_name.upper(), result))
+    if args.json:
+        output = [
+            {"payload": payload, "results": results}
+            for payload, results in zip(payloads, predictions)
+        ]
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+        return
+
+    for index, (payload, results) in enumerate(zip(payloads, predictions), start=1):
+        if len(payloads) > 1:
+            print("\n[{}] Payload：{}".format(index, payload))
+        for model_name, result in results.items():
+            print("{} 模型预测结果：{}".format(model_name.upper(), result))
 
 
 if __name__ == "__main__":

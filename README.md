@@ -115,6 +115,12 @@ python predict.py "http://example.com/?id=1 union select password from users"
 
 也可以使用 `--models svm cnn` 只调用指定模型。
 
+批量预测时，输入文件每行放置一个 Payload。模型只加载一次，可使用 `--json` 输出便于其他程序处理的结果：
+
+```powershell
+python predict.py --input-file payloads.txt --models rf svm --json
+```
+
 ### 当前评估结果
 
 以下结果来自随机种子为 42、完成规范化去重后的固定测试集，共 7304 条样本：

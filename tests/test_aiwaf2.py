@@ -1,4 +1,5 @@
 import csv
+import numpy as np
 import sys
 import tempfile
 import unittest
@@ -13,7 +14,7 @@ sys.path.insert(0, str(CODE_DIR))
 from loaddata import NORMAL, SQL_INJECTION, XSS, loaddata_sqli, loaddata_xss
 from artifacts import atomic_json_dump, sha256_file
 import predict
-from predict import consensus_label, label_name
+from predict import PredictionEngine, consensus_label, label_name, load_payloads
 from splitdata import _deduplicate
 from staticfeature import normalize_payload
 import trainmain
@@ -103,6 +104,39 @@ class FeaturePipelineTests(unittest.TestCase):
             "模型意见不一致",
             consensus_label({"rf": "正常", "svm": "SQL注入攻击"}),
         )
+
+    def test_batch_engine_loads_each_model_once(self):
+        class FakePipeline:
+            def transform_tfidf(self, payloads):
+                return np.zeros((len(payloads), 2))
+
+        class FakeModel:
+            def predict(self, values):
+                return np.asarray([NORMAL, SQL_INJECTION])
+
+        with patch.object(
+            predict, "validate_artifacts", return_value=Path("pipeline")
+        ), patch.object(
+            predict.FeaturePipeline, "load", return_value=FakePipeline()
+        ), patch.object(
+            predict.joblib, "load", side_effect=[FakeModel(), FakeModel()]
+        ) as load_mock:
+            engine = PredictionEngine(["rf", "svm"])
+            results = engine.predict_many(["/safe", "1 union select"])
+
+        self.assertEqual(2, load_mock.call_count)
+        self.assertEqual("正常", results[0]["ensemble"])
+        self.assertEqual("SQL注入攻击", results[1]["ensemble"])
+
+    def test_payload_file_ignores_blank_lines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            filename = Path(directory) / "payloads.txt"
+            filename.write_text(
+                "/safe\n\n<script>alert(1)</script>\n", encoding="utf-8"
+            )
+            payloads = load_payloads(input_file=filename)
+
+        self.assertEqual(["/safe", "<script>alert(1)</script>"], payloads)
 
 
 class ArtifactValidationTests(unittest.TestCase):
