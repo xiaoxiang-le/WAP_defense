@@ -24,12 +24,23 @@ class WafUI:
         log_file=None,
         log_body=False,
         threshold=0.5,
+        log_max_bytes=10 * 1024 * 1024,
+        log_backups=5,
     ):
         self.root = root
         self.interface = interface
         self.port = port
         self.max_body_bytes = max_body_bytes
-        self.logger = JsonlDetectionLogger(log_file, log_body) if log_file else None
+        self.logger = (
+            JsonlDetectionLogger(
+                log_file,
+                include_body=log_body,
+                max_bytes=log_max_bytes,
+                backup_count=log_backups,
+            )
+            if log_file
+            else None
+        )
         self.threshold = threshold
         self.events = queue.Queue()
         self.stop_event = threading.Event()
@@ -179,6 +190,8 @@ def UI_start(
     log_file=None,
     log_body=False,
     threshold=0.5,
+    log_max_bytes=10 * 1024 * 1024,
+    log_backups=5,
 ):
     root = tk.Tk()
     WafUI(
@@ -189,5 +202,7 @@ def UI_start(
         log_file=log_file,
         log_body=log_body,
         threshold=threshold,
+        log_max_bytes=log_max_bytes,
+        log_backups=log_backups,
     )
     root.mainloop()

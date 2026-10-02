@@ -149,6 +149,34 @@ class CaptureConfigurationTests(unittest.TestCase):
 
 
 class DetectionLogTests(unittest.TestCase):
+    def test_log_rotation_keeps_configured_number_of_backups(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            logger = JsonlDetectionLogger(path, max_bytes=1, backup_count=2)
+
+            for index in range(3):
+                logger.write({"url": "/{}".format(index)}, "result-{}".format(index), "risk")
+
+            current = json.loads(path.read_text(encoding="utf-8"))
+            previous = json.loads(Path("{}.1".format(path)).read_text(encoding="utf-8"))
+            oldest = json.loads(Path("{}.2".format(path)).read_text(encoding="utf-8"))
+
+        self.assertEqual("result-2", current["classification"])
+        self.assertEqual("result-1", previous["classification"])
+        self.assertEqual("result-0", oldest["classification"])
+
+    def test_log_rotation_can_be_disabled(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            logger = JsonlDetectionLogger(path, max_bytes=0)
+            logger.write({"url": "/one"}, "one", "risk")
+            logger.write({"url": "/two"}, "two", "risk")
+
+            lines = path.read_text(encoding="utf-8").splitlines()
+
+        self.assertEqual(2, len(lines))
+        self.assertFalse(Path("{}.1".format(path)).exists())
+
     def test_log_omits_request_body_by_default(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "events.jsonl"

@@ -38,11 +38,27 @@ def parse_args():
         default=0.5,
         help="判定恶意请求的概率阈值，范围 0 到 1，默认 0.5",
     )
+    parser.add_argument(
+        "--log-max-bytes",
+        type=int,
+        default=10 * 1024 * 1024,
+        help="单个日志文件的大小上限，0 表示不轮转，默认 10485760",
+    )
+    parser.add_argument(
+        "--log-backups",
+        type=int,
+        default=5,
+        help="轮转日志的保留数量，默认 5",
+    )
     args = parser.parse_args()
     if args.log_body and not args.log_file:
         parser.error("--log-body 必须与 --log-file 一起使用")
     if not 0 <= args.threshold <= 1:
         parser.error("--threshold 必须在 0 到 1 之间")
+    if args.log_max_bytes < 0:
+        parser.error("--log-max-bytes 不能为负数")
+    if args.log_backups < 0:
+        parser.error("--log-backups 不能为负数")
     return args
 
 
@@ -65,6 +81,8 @@ def main():
         log_file=args.log_file,
         log_body=args.log_body,
         threshold=args.threshold,
+        log_max_bytes=args.log_max_bytes,
+        log_backups=args.log_backups,
     )
 
 
