@@ -46,9 +46,18 @@ def packet_to_record(packet, max_body_bytes=65536):
     detection_payload = url if not body else "{}\n{}".format(url, body)
 
     return {
+        "source_ip": source_ip,
+        "target_ip": target_ip,
+        "source_mac": source_mac,
+        "target_mac": target_mac,
         "url": url,
         "body": body,
         "payload": detection_payload,
+        "method": method,
+        "user_agent": user_agent,
+        "host": host,
+        "path": path,
+        "content_type": content_type,
         "display": [
             "IP_Src：" + source_ip,
             "IP_Dst：" + target_ip,

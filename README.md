@@ -145,6 +145,12 @@ python main.py --interface "Ethernet" --port 8080
 
 # 限制每个 HTTP 请求体最多读取 32768 字节
 python main.py --port 8080 --max-body-bytes 32768
+
+# 将检测结果追加写入 JSONL；请求体默认不会写入日志
+python main.py --port 8080 --log-file ..\logs\detections.jsonl
+
+# 显式记录请求体（请求体可能包含密码、令牌等敏感信息）
+python main.py --port 8080 --log-file ..\logs\detections.jsonl --log-body
 ```
 
 ### 运行测试

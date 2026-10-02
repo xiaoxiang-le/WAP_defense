@@ -26,7 +26,16 @@ def parse_args():
         action="store_true",
         help="重新训练 AiWaf-1 分类模型后退出",
     )
-    return parser.parse_args()
+    parser.add_argument("--log-file", help="将检测事件追加写入指定 JSONL 文件")
+    parser.add_argument(
+        "--log-body",
+        action="store_true",
+        help="在 JSONL 日志中记录请求体；可能包含敏感信息",
+    )
+    args = parser.parse_args()
+    if args.log_body and not args.log_file:
+        parser.error("--log-body 必须与 --log-file 一起使用")
+    return args
 
 
 def main():
@@ -45,6 +54,8 @@ def main():
         interface=args.interface,
         port=args.port,
         max_body_bytes=args.max_body_bytes,
+        log_file=args.log_file,
+        log_body=args.log_body,
     )
 
 
