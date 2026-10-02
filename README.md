@@ -78,6 +78,19 @@ conda activate aiwaf-py38
 
 如果环境已经存在，可执行 `conda env update -f AiWaf-2\environment.yml --prune` 更新依赖。
 
+#### venv 环境配置
+
+项目依赖 TensorFlow 2.13，使用 venv 时需要 Python 3.8。请在项目根目录使用 Python 3.8 解释器执行：
+
+```powershell
+py -3.8 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+执行 `python -c "import sys; print(sys.executable)"` 可以确认当前解释器是否来自项目的 `.venv`。
+
 ### 运行项目
 
 先进入代码目录：
