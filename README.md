@@ -167,6 +167,8 @@ python main.py --port 8080 --log-file ..\logs\detections.jsonl --log-body
 python -m unittest discover -s tests -v
 ```
 
+GitHub Actions 会在推送或向 `main`、`master` 提交 Pull Request 时自动运行同一组单元测试。CI 使用 `requirements-test.txt` 的轻量依赖，不会重新训练或覆盖模型文件。
+
 安装 Npcap 后，可以运行端到端集成测试。该测试会在本机启动临时 HTTP 服务，发送一条 XSS 请求，并验证抓包、URL 解析、模型分类和风险判断的完整链路：
 
 ```powershell
