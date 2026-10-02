@@ -5,6 +5,7 @@ from pathlib import Path
 
 from PIL import Image, ImageTk
 
+from detection_log import JsonlDetectionLogger
 from geturl import sniff_requests
 from train_url import Train, split_word
 from type import find_type
@@ -14,11 +15,20 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 class WafUI:
-    def __init__(self, root, interface=None, port=80, max_body_bytes=65536):
+    def __init__(
+        self,
+        root,
+        interface=None,
+        port=80,
+        max_body_bytes=65536,
+        log_file=None,
+        log_body=False,
+    ):
         self.root = root
         self.interface = interface
         self.port = port
         self.max_body_bytes = max_body_bytes
+        self.logger = JsonlDetectionLogger(log_file, log_body) if log_file else None
         self.events = queue.Queue()
         self.stop_event = threading.Event()
         self.worker = None
@@ -44,7 +54,11 @@ class WafUI:
         interface_text = self.interface or "系统默认网卡"
         tk.Label(
             info_frame,
-            text="监听接口：{}    HTTP 端口：{}".format(interface_text, self.port),
+            text="监听接口：{}    HTTP 端口：{}    日志：{}".format(
+                interface_text,
+                self.port,
+                self.logger.path if self.logger else "关闭",
+            ),
         ).pack(pady=6)
 
         result_frame = tk.LabelFrame(self.root, text="实时入侵检测结果")
@@ -95,6 +109,12 @@ class WafUI:
                         if result == "url为恶意攻击"
                         else "攻击类型：无"
                     )
+                    if self.logger:
+                        try:
+                            self.logger.write(record, result, attack_type)
+                        except OSError as error:
+                            self.events.put(["日志写入失败：{}".format(error)])
+                            self.logger = None
                     self.events.put(record["display"] + [result, attack_type])
         except Exception as error:
             self.events.put(["检测停止：{}".format(error)])
@@ -135,7 +155,20 @@ class WafUI:
         self.root.destroy()
 
 
-def UI_start(interface=None, port=80, max_body_bytes=65536):
+def UI_start(
+    interface=None,
+    port=80,
+    max_body_bytes=65536,
+    log_file=None,
+    log_body=False,
+):
     root = tk.Tk()
-    WafUI(root, interface=interface, port=port, max_body_bytes=max_body_bytes)
+    WafUI(
+        root,
+        interface=interface,
+        port=port,
+        max_body_bytes=max_body_bytes,
+        log_file=log_file,
+        log_body=log_body,
+    )
     root.mainloop()

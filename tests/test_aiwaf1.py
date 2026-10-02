@@ -1,5 +1,7 @@
 import importlib.util
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -13,6 +15,7 @@ CODE_DIR = ROOT / "AiWaf-1" / "code"
 sys.path.insert(0, str(CODE_DIR))
 
 from train_url import _deduplicate_samples, normalize_url, split_word
+from detection_log import JsonlDetectionLogger
 import geturl
 
 
@@ -109,6 +112,45 @@ class CaptureConfigurationTests(unittest.TestCase):
 
         self.assertIn("IP_Src：2001:db8::1", record["display"])
         self.assertIn("IP_Dst：2001:db8::2", record["display"])
+
+
+class DetectionLogTests(unittest.TestCase):
+    def test_log_omits_request_body_by_default(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            logger = JsonlDetectionLogger(path)
+            logger.write(
+                {
+                    "source_ip": "127.0.0.1",
+                    "target_ip": "127.0.0.1",
+                    "method": "POST",
+                    "host": "example.test",
+                    "path": "/login",
+                    "url": "example.test/login",
+                    "content_type": "application/json",
+                    "body": '{"password":"secret"}',
+                },
+                "url为恶意攻击",
+                "攻击类型：SQL注入  攻击等级：严重",
+            )
+            event = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertNotIn("body", event)
+        self.assertEqual("POST", event["method"])
+        self.assertEqual("url为恶意攻击", event["classification"])
+
+    def test_log_can_include_request_body_explicitly(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "events.jsonl"
+            logger = JsonlDetectionLogger(path, include_body=True)
+            logger.write(
+                {"url": "example.test/login", "body": "id=1 union select"},
+                "url为恶意攻击",
+                "攻击类型：SQL注入  攻击等级：中级",
+            )
+            event = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual("id=1 union select", event["body"])
 
 
 if __name__ == "__main__":
