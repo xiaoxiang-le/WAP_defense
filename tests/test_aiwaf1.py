@@ -1,8 +1,10 @@
 import importlib.util
+import io
 import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -17,6 +19,7 @@ sys.path.insert(0, str(CODE_DIR))
 from train_url import Train, _deduplicate_samples, normalize_url, split_word
 from detection_log import JsonlDetectionLogger
 import geturl
+import main as aiwaf1_main
 
 
 def load_rule_module():
@@ -90,6 +93,40 @@ class PredictionThresholdTests(unittest.TestCase):
             self.detector.predict_details(["payload"], threshold=1.1)
         with self.assertRaises(ValueError):
             self.detector.predict([])
+
+
+class OfflineDetectionTests(unittest.TestCase):
+    class FakeDetector:
+        @staticmethod
+        def predict_details(payloads, threshold=0.5):
+            return [
+                {
+                    "label": int(payload == "attack"),
+                    "malicious_probability": 0.9 if payload == "attack" else 0.1,
+                    "message": "url为恶意攻击" if payload == "attack" else "url为正常请求",
+                }
+                for payload in payloads
+            ]
+
+    def test_offline_detection_can_output_machine_readable_json(self):
+        output = io.StringIO()
+        with patch.object(
+            aiwaf1_main.Train,
+            "load_or_train",
+            return_value=self.FakeDetector(),
+        ), redirect_stdout(output):
+            results = aiwaf1_main.detect_payloads(
+                ["safe", "attack"], threshold=0.7, json_output=True
+            )
+
+        rendered = json.loads(output.getvalue())
+        self.assertEqual(results, rendered)
+        self.assertEqual([0, 1], [item["label"] for item in rendered])
+        self.assertEqual("attack", rendered[1]["payload"])
+
+    def test_json_output_requires_an_offline_payload(self):
+        with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            aiwaf1_main.parse_args(["--json"])
 
 
 class CaptureConfigurationTests(unittest.TestCase):

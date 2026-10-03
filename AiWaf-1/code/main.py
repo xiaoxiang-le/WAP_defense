@@ -1,4 +1,5 @@
 import argparse
+import json
 import sys
 
 from train_url import Train
@@ -11,7 +12,7 @@ def configure_console_encoding():
                 stream.reconfigure(encoding="utf-8")
 
 
-def parse_args():
+def parse_args(arguments=None):
     parser = argparse.ArgumentParser(description="AiWaf-1 HTTP 实时入侵检测界面")
     parser.add_argument("--interface", help="抓包网卡名称；不指定时使用系统默认网卡")
     parser.add_argument("--port", type=int, default=80, help="监听的 HTTP TCP 端口")
@@ -50,7 +51,17 @@ def parse_args():
         default=5,
         help="轮转日志的保留数量，默认 5",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--payload",
+        action="append",
+        help="离线检测一条 URL 或 Payload；可重复指定以批量检测",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="将离线检测结果输出为 JSON",
+    )
+    args = parser.parse_args(arguments)
     if args.log_body and not args.log_file:
         parser.error("--log-body 必须与 --log-file 一起使用")
     if not 0 <= args.threshold <= 1:
@@ -59,7 +70,33 @@ def parse_args():
         parser.error("--log-max-bytes 不能为负数")
     if args.log_backups < 0:
         parser.error("--log-backups 不能为负数")
+    if args.retrain and args.payload:
+        parser.error("--retrain 不能与 --payload 同时使用")
+    if args.json and not args.payload:
+        parser.error("--json 必须与 --payload 一起使用")
     return args
+
+
+def detect_payloads(payloads, threshold=0.5, json_output=False):
+    """使用 AiWaf-1 模型离线检测 Payload，并将结果写入标准输出。"""
+    detector = Train.load_or_train()
+    details = detector.predict_details(payloads, threshold=threshold)
+    results = [
+        {"payload": payload, **detail}
+        for payload, detail in zip(payloads, details)
+    ]
+    if json_output:
+        print(json.dumps(results, ensure_ascii=False, indent=2))
+    else:
+        for result in results:
+            print(
+                "{}  恶意概率：{:.2%}  Payload：{}".format(
+                    result["message"],
+                    result["malicious_probability"],
+                    result["payload"],
+                )
+            )
+    return results
 
 
 def main():
@@ -67,6 +104,9 @@ def main():
     args = parse_args()
     if args.retrain:
         Train().model_train()
+        return
+    if args.payload:
+        detect_payloads(args.payload, threshold=args.threshold, json_output=args.json)
         return
     from UI import UI_start
 
