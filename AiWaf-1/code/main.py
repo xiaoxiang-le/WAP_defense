@@ -1,6 +1,7 @@
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from train_url import Train
 
@@ -57,6 +58,10 @@ def parse_args(arguments=None):
         help="离线检测一条 URL 或 Payload；可重复指定以批量检测",
     )
     parser.add_argument(
+        "--input-file",
+        help="从 UTF-8 文本文件逐行读取待离线检测的 Payload",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="将离线检测结果输出为 JSON",
@@ -70,11 +75,28 @@ def parse_args(arguments=None):
         parser.error("--log-max-bytes 不能为负数")
     if args.log_backups < 0:
         parser.error("--log-backups 不能为负数")
-    if args.retrain and args.payload:
-        parser.error("--retrain 不能与 --payload 同时使用")
-    if args.json and not args.payload:
-        parser.error("--json 必须与 --payload 一起使用")
+    has_offline_input = args.payload or args.input_file
+    if args.retrain and has_offline_input:
+        parser.error("--retrain 不能与离线检测参数同时使用")
+    if args.json and not has_offline_input:
+        parser.error("--json 必须与 --payload 或 --input-file 一起使用")
     return args
+
+
+def load_payload_file(filename):
+    """从 UTF-8 文本文件读取非空 Payload。"""
+    path = Path(filename).expanduser()
+    try:
+        payloads = [
+            line.strip()
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+    except OSError as error:
+        raise ValueError("无法读取 Payload 文件 {}：{}".format(path, error)) from error
+    if not payloads:
+        raise ValueError("Payload 文件中没有有效内容：{}".format(path))
+    return payloads
 
 
 def detect_payloads(payloads, threshold=0.5, json_output=False):
@@ -105,8 +127,14 @@ def main():
     if args.retrain:
         Train().model_train()
         return
-    if args.payload:
-        detect_payloads(args.payload, threshold=args.threshold, json_output=args.json)
+    if args.payload or args.input_file:
+        payloads = list(args.payload or [])
+        if args.input_file:
+            try:
+                payloads.extend(load_payload_file(args.input_file))
+            except ValueError as error:
+                raise SystemExit(str(error))
+        detect_payloads(payloads, threshold=args.threshold, json_output=args.json)
         return
     from UI import UI_start
 

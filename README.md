@@ -167,6 +167,9 @@ python main.py --port 8080 --threshold 0.65
 # 不启动图形界面和抓包，直接检测一条或多条 Payload
 python main.py --payload "/index.php?id=1 union select password from users"
 python main.py --payload "/products/list" --payload "<script>alert(1)</script>" --json
+
+# 从 UTF-8 文本文件批量读取 Payload（每行一条，自动忽略空行）
+python main.py --input-file ..\data\payloads.txt --threshold 0.65 --json
 ```
 
 ### 运行测试

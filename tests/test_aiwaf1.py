@@ -128,6 +128,23 @@ class OfflineDetectionTests(unittest.TestCase):
         with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             aiwaf1_main.parse_args(["--json"])
 
+    def test_payload_file_ignores_blank_lines(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "payloads.txt"
+            path.write_text("/safe\n\n  attack  \n", encoding="utf-8")
+
+            payloads = aiwaf1_main.load_payload_file(path)
+
+        self.assertEqual(["/safe", "attack"], payloads)
+
+    def test_empty_payload_file_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "payloads.txt"
+            path.write_text("\n  \n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "没有有效内容"):
+                aiwaf1_main.load_payload_file(path)
+
 
 class CaptureConfigurationTests(unittest.TestCase):
     def test_custom_port_is_bound_and_filtered(self):
